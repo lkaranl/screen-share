@@ -1,0 +1,22 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+description = "Native screen share client using SDL2 and FFmpeg"
+
+[dependencies]
+# GUI and Input
+sdl2 = { version = "0.36", features = ["gfx"] }
+
+# Video Decode
+ffmpeg-next = "7.0.0"
+
+# Async and Network
+tokio = { version = "1", features = ["full"] }
+
+# JSON Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"

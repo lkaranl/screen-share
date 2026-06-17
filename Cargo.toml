@@ -1,42 +1,6 @@
-[package]
-name = "screen-share"
-version = "0.1.0"
-edition = "2021"
-description = "Screen sharing server for Linux with WebRTC — browser-based remote desktop"
-
-[[bin]]
-name = "screen-share"
-path = "src/main.rs"
-
-[dependencies]
-# Web server e WebSocket para sinalização
-axum = { version = "0.7", features = ["ws"] }
-
-# Async runtime
-tokio = { version = "1", features = ["full"] }
-futures-util = "0.3"
-
-# WebRTC (PeerConnection, VideoTrack, DataChannel, ICE, DTLS)
-webrtc = "0.11"
-
-# Serialização JSON (SDP/ICE/input messages)
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Input injection via uinput (Linux only)
-evdev = "0.12"
-
-# Buffers zero-copy para frames H.264
-bytes = "1"
-
-# Error handling ergonômico
-anyhow = "1"
-
-# Logging estruturado
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
+[workspace]
+members = [
+    "server",
+    "client"
+]
+resolver = "2"

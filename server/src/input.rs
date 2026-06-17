@@ -6,8 +6,10 @@ use evdev::{
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
+use serde::{Serialize, Deserialize};
+
 /// Comandos de input enviados do WebRTC DataChannel para o thread uinput.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum InputCommand {
     /// Movimento relativo do mouse (delta x, delta y)
     MouseMove { dx: i32, dy: i32 },

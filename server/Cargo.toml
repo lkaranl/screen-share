@@ -1,0 +1,35 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+description = "Screen sharing server for Linux using raw TCP and FFmpeg"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialização JSON (input messages)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Input injection via uinput (Linux only)
+evdev = "0.12"
+
+# Buffers
+bytes = "1"
+
+# Error handling ergonômico
+anyhow = "1"
+
+# Logging estruturado
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
