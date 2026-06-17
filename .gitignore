@@ -1,0 +1,11 @@
+# Gerado pelo Cargo
+/target/
+
+# Arquivos temporários e de build do IDE/Sistema
+.DS_Store
+.idea/
+.vscode/
+*.rs.bk
+
+# Logs
+*.log
