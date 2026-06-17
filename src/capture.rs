@@ -43,7 +43,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let bitrate = &config.bitrate;
 
     // Pipeline: mantém frame na GPU via VAAPI
-    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
+    let vf = "hwmap=derive_device=vaapi,scale_vaapi=w=1280:h=720:format=nv12".to_string();
  
     info!(
         "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={}",
@@ -69,10 +69,10 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             "-c:v", "h264_vaapi",
             // constrained_baseline = máxima compatibilidade com Chrome/Firefox/Safari
             "-profile:v", "constrained_baseline",
-            "-level", "40",
-            "-b:v", bitrate,
-            "-maxrate", bitrate,
-            "-bufsize", "2M",
+            "-level", "31",
+            "-b:v", "1500k",
+            "-maxrate", "1500k",
+            "-bufsize", "1M",
             // Keyframe frequente: a cada 30 frames (1 segundo). Assim o browser
             // consegue iniciar decodificação rapidamente ao se conectar.
             "-g", &gop_str,
