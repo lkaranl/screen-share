@@ -42,11 +42,11 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let framerate_str = config.framerate.to_string();
     let bitrate = &config.bitrate;
 
-    // Pipeline: captura via kmsgrab, mapeia para VAAPI para escala na GPU, e baixa para CPU (RAM)
-    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12,hwdownload,format=nv12".to_string();
+    // Pipeline: mantém frame na GPU via VAAPI
+    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
  
     info!(
-        "🎬 Iniciando FFmpeg (libx264): kmsgrab device={} render={} fps={} bitrate={}",
+        "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={}",
         config.drm_device, config.render_device, config.framerate, config.bitrate
     );
  
@@ -54,7 +54,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         .args([
             "-hide_banner",
             "-loglevel", "warning",
-            // ── Hardware VAAPI (apenas para filtros) ──────────────────────────────
+            // ── Hardware VAAPI ────────────────────────────────────────────────────
             "-init_hw_device", &format!("drm=drm:{}", config.render_device),
             "-init_hw_device", "vaapi=va@drm",
             "-filter_hw_device", "va",
@@ -63,19 +63,23 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             "-device", &config.drm_device,
             "-framerate", &framerate_str,
             "-i", &config.drm_device,
-            // ── Filtros (GPU para CPU) ────────────────────────────────────────────
+            // ── Filtros GPU ───────────────────────────────────────────────────────
             "-vf", &vf,
-            // ── Codec H.264 libx264 (Software) ────────────────────────────────────
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
-            "-profile:v", "baseline",
-            "-pix_fmt", "yuv420p",
+            // ── Codec H.264 VAAPI ─────────────────────────────────────────────────
+            "-c:v", "h264_vaapi",
+            // constrained_baseline = máxima compatibilidade com Chrome/Firefox/Safari
+            "-profile:v", "constrained_baseline",
+            "-level", "40",
             "-b:v", bitrate,
             "-maxrate", bitrate,
             "-bufsize", "2M",
+            // Keyframe frequente: a cada 30 frames (1 segundo). Assim o browser
+            // consegue iniciar decodificação rapidamente ao se conectar.
             "-g", &gop_str,
-            "-x264-params", "keyint=30:min-keyint=30:scenecut=0",
+            "-force_key_frames", "expr:gte(t,n_forced*1)",
+            // dump_extra injeta SPS/PPS em cada IDR frame (in-band headers).
+            // Sem isso, browsers frequentemente ficam com tela preta.
+            "-bsf:v", "dump_extra=freq=keyframe",
             // ── Sem áudio ─────────────────────────────────────────────────────────
             "-an",
             // ── Saída: H.264 Annex-B para stdout ─────────────────────────────────

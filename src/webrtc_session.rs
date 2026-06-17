@@ -300,9 +300,17 @@ async fn stream_video(
                         info!("📊 {} NAL units processados no total", frame_count);
                     }
 
+                    // No WebRTC, metadados (SPS, PPS, SEI) devem ser aplicados no mesmo
+                    // timestamp RTP do frame de vídeo correspondente. Definimos a duração
+                    // como zero para que o webrtc-rs envie-os no mesmo timestamp RTP.
+                    let sample_duration = match nal_type {
+                        7 | 8 | 6 => Duration::from_secs(0),
+                        _ => frame_duration,
+                    };
+
                     let sample = Sample {
                         data: nalu,
-                        duration: frame_duration,
+                        duration: sample_duration,
                         ..Default::default()
                     };
 

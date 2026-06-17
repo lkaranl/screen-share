@@ -510,6 +510,7 @@ async function connect() {
       video.srcObject = new MediaStream([e.track]);
       showToast('Stream de vídeo recebido (track)!', '🎥');
     }
+    video.play().catch(err => console.warn('Erro ao reproduzir vídeo automaticamente:', err));
   };
 
   // DataChannel para envio de input (criado pelo browser)
