@@ -26,35 +26,24 @@ impl Default for CaptureConfig {
                 .unwrap_or_else(|_| "/dev/dri/renderD128".to_string()),
             framerate: 30,
             bitrate: "4M".to_string(),
-            gop_size: 60, // keyframe a cada 2 segundos @ 30fps
+            gop_size: 30, // keyframe a cada 1 segundo @ 30fps (mais fácil para browser sincronizar)
         }
     }
 }
 
 /// Inicia o processo FFmpeg para captura de tela via kmsgrab + VAAPI.
 ///
-/// ## Por que VAAPI?
-/// O framebuffer do servidor está em formato 10-bit (ABGR2101010 / FourCC: AB30).
-/// O pipeline clássico `kmsgrab → hwdownload → libx264` falha porque o FFmpeg 6.1
-/// não consegue fazer download de CPU para esse formato.
-///
 /// ## Pipeline FFmpeg (GPU inteiro):
-/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(nv12) → h264_vaapi → H.264 → pipe:1`
+/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(nv12) → h264_vaapi → H.264 Annex-B → stdout`
 ///
-/// Todo o processamento fica na GPU — sem cópia para CPU, sem problema de pixel format.
-///
-/// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo para o processo continuar.
+/// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo.
 pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let gop_str = config.gop_size.to_string();
     let framerate_str = config.framerate.to_string();
     let bitrate = &config.bitrate;
 
-    // Pipeline de filtros: mantém frame na GPU via VAAPI durante todo o processo
-    // hwmap: mapeia o frame DRM para a interface VAAPI
-    // scale_vaapi: converte para NV12 (formato exigido pelo h264_vaapi)
-    let vf = format!(
-        "hwmap=derive_device=vaapi,scale_vaapi=format=nv12"
-    );
+    // Pipeline: mantém frame na GPU via VAAPI
+    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
 
     info!(
         "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={}",
@@ -63,34 +52,37 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
 
     let mut child = Command::new("ffmpeg")
         .args([
-            // Suprime banner do FFmpeg
             "-hide_banner",
             "-loglevel", "warning",
-            // ── Inicializa hardware VAAPI via render node ─────────────────────────
-            // Passo 1: inicializa o DRM device (kmsgrab vai usar este contexto)
+            // ── Hardware VAAPI ────────────────────────────────────────────────────
             "-init_hw_device", &format!("drm=drm:{}", config.render_device),
-            // Passo 2: inicializa VAAPI derivando do DRM
             "-init_hw_device", "vaapi=va@drm",
-            // Informa ao filtro qual device VAAPI usar
             "-filter_hw_device", "va",
-            // ── Input: DRM/KMS via kmsgrab ─────────────────────────────────────────
+            // ── Input: kmsgrab DRM/KMS ────────────────────────────────────────────
             "-f", "kmsgrab",
             "-device", &config.drm_device,
             "-framerate", &framerate_str,
             "-i", &config.drm_device,
-            // ── Filtros de vídeo (na GPU via VAAPI) ───────────────────────────────
+            // ── Filtros GPU ───────────────────────────────────────────────────────
             "-vf", &vf,
-            // ── Codec: H.264 via VAAPI (encode na GPU) ────────────────────────────
+            // ── Codec H.264 VAAPI ─────────────────────────────────────────────────
             "-c:v", "h264_vaapi",
-            "-bsf:v", "dump_extra=freq=keyframe",
+            // constrained_baseline = máxima compatibilidade com Chrome/Firefox/Safari
+            "-profile:v", "constrained_baseline",
+            "-level", "4.0",
             "-b:v", bitrate,
             "-maxrate", bitrate,
             "-bufsize", "2M",
-            // ── GOP ────────────────────────────────────────────────────────────────
+            // Keyframe frequente: a cada 30 frames (1 segundo). Assim o browser
+            // consegue iniciar decodificação rapidamente ao se conectar.
             "-g", &gop_str,
-            // ── Sem áudio/legendas ─────────────────────────────────────────────────
-            "-an", "-sn",
-            // ── Output: H.264 Annex-B para stdout ─────────────────────────────────
+            "-force_key_frames", "expr:gte(t,n_forced*1)",
+            // dump_extra injeta SPS/PPS em cada IDR frame (in-band headers).
+            // Sem isso, browsers frequentemente ficam com tela preta.
+            "-bsf:v", "dump_extra=freq=keyframe",
+            // ── Sem áudio ─────────────────────────────────────────────────────────
+            "-an",
+            // ── Saída: H.264 Annex-B para stdout ─────────────────────────────────
             "-f", "h264",
             "pipe:1",
         ])
@@ -98,7 +90,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .context("Falha ao iniciar ffmpeg com VAAPI. Verifique se h264_vaapi está disponível e se o render device existe.")?;
+        .context("Falha ao iniciar ffmpeg com VAAPI. Verifique se h264_vaapi está disponível.")?;
 
     let stdout = child
         .stdout

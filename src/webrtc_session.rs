@@ -36,35 +36,24 @@ use crate::{
     input::{InputCommand, InputSender},
 };
 
-/// Cria uma sessão WebRTC completa:
-/// - RTCPeerConnection com track de vídeo H.264
-/// - DataChannel handler para input do browser
-/// - ICE candidate forwarding via channel
-/// - Pipeline FFmpeg → H.264 → WebRTC
-///
-/// Retorna `(pc, is_connected, ice_outbound_tx)`.
+/// Cria uma sessão WebRTC completa.
 pub async fn create_session(
     input_tx: InputSender,
     ice_outbound_tx: tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<Arc<RTCPeerConnection>> {
-    // ── MediaEngine: registra codecs padrão (inclui H.264) ─────────────
     let mut m = MediaEngine::default();
     m.register_default_codecs()?;
 
-    // ── Interceptors: NACK, RTCP reports, etc. ──────────────────────────
     let mut registry = Registry::new();
     registry = register_default_interceptors(registry, &mut m)?;
 
-    // ── API WebRTC ───────────────────────────────────────────────────────
     let api = APIBuilder::new()
         .with_media_engine(m)
         .with_interceptor_registry(registry)
         .build();
 
-    // ── Configuração do PeerConnection ──────────────────────────────────
     let config = RTCConfiguration {
         ice_servers: vec![RTCIceServer {
-            // STUN público do Google para descoberta de endereço NAT
             urls: vec!["stun:stun.l.google.com:19302".to_owned()],
             ..Default::default()
         }],
@@ -73,39 +62,31 @@ pub async fn create_session(
 
     let pc = Arc::new(api.new_peer_connection(config).await?);
 
-    // ── Track de vídeo H.264 ─────────────────────────────────────────────
+    // ── Track de vídeo H.264 via TrackLocalStaticSample ─────────────────
     let video_track = Arc::new(TrackLocalStaticSample::new(
         RTCRtpCodecCapability {
             mime_type: MIME_TYPE_H264.to_owned(),
-            clock_rate: 90_000, // clock rate padrão para vídeo
+            clock_rate: 90_000,
             ..Default::default()
         },
         "video".to_owned(),
         "screen-share".to_owned(),
     ));
 
-    // Adiciona a track ao PeerConnection (servidor envia vídeo)
     let rtp_sender = pc
         .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
         .await?;
 
-    // ── RTCP reader: processa PLI (Picture Loss Indication) ─────────────
-    // O browser envia PLI quando perde frames — pedindo um novo keyframe.
-    // Precisamos ler esses pacotes para não bloquear o canal RTCP.
     tokio::spawn(async move {
         let mut buf = vec![0u8; 1500];
-        while let Ok((_, _)) = rtp_sender.read(&mut buf).await {
-            // PLI é tratado automaticamente pelo interceptor de NACK.
-            // Lemos aqui apenas para não bloquear o buffer.
-        }
+        while let Ok((_, _)) = rtp_sender.read(&mut buf).await {}
     });
 
-    // ── Flag para detectar encerramento de conexão ───────────────────────
     let is_active = Arc::new(AtomicBool::new(true));
-    let is_active_on_state = Arc::clone(&is_active);
+    let is_active_state = Arc::clone(&is_active);
 
     pc.on_peer_connection_state_change(Box::new(move |state: RTCPeerConnectionState| {
-        let is_active = Arc::clone(&is_active_on_state);
+        let is_active = Arc::clone(&is_active_state);
         Box::pin(async move {
             info!("🔗 Estado WebRTC: {:?}", state);
             match state {
@@ -122,8 +103,6 @@ pub async fn create_session(
         })
     }));
 
-    // ── ICE candidate handler ────────────────────────────────────────────
-    // Quando um novo ICE candidate é descoberto localmente, envia ao browser.
     let ice_tx = ice_outbound_tx.clone();
     pc.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
         let ice_tx = ice_tx.clone();
@@ -146,24 +125,18 @@ pub async fn create_session(
         })
     }));
 
-    // ── DataChannel handler: input do browser ───────────────────────────
-    // O browser cria um DataChannel chamado "input".
-    // O servidor recebe aqui os eventos de mouse e teclado.
     let input_tx_dc = input_tx.clone();
     pc.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
         let input_tx = input_tx_dc.clone();
         Box::pin(async move {
             let label = dc.label().to_owned();
             info!("📨 DataChannel recebido: '{}'", label);
-
             if label != "input" {
                 return;
             }
-
             dc.on_open(Box::new(|| {
                 Box::pin(async { info!("🎮 DataChannel 'input' aberto — controle ativo") })
             }));
-
             dc.on_message(Box::new(move |msg: DataChannelMessage| {
                 let input_tx = input_tx.clone();
                 Box::pin(async move {
@@ -175,7 +148,6 @@ pub async fn create_session(
         })
     }));
 
-    // ── Pipeline de vídeo: FFmpeg → WebRTC ──────────────────────────────
     let video_track_task = Arc::clone(&video_track);
     let is_active_task = Arc::clone(&is_active);
     tokio::spawn(async move {
@@ -187,104 +159,143 @@ pub async fn create_session(
     Ok(pc)
 }
 
-/// Processa uma mensagem JSON de input recebida pelo DataChannel.
 async fn handle_input_message(input_tx: &InputSender, text: &str) {
     let Ok(event) = serde_json::from_str::<serde_json::Value>(text) else {
         return;
     };
-
     let cmd = match event["t"].as_str() {
-        Some("mm") => {
-            // Mouse move (delta)
-            let dx = event["x"].as_i64().unwrap_or(0) as i32;
-            let dy = event["y"].as_i64().unwrap_or(0) as i32;
-            InputCommand::MouseMove { dx, dy }
-        }
-        Some("mb") => {
-            // Mouse button
-            let button = event["b"].as_u64().unwrap_or(0) as u8;
-            let pressed = event["d"].as_bool().unwrap_or(false);
-            InputCommand::MouseButton { button, pressed }
-        }
-        Some("mw") => {
-            // Mouse scroll
-            let dy = event["dy"].as_i64().unwrap_or(0) as i32;
-            InputCommand::MouseScroll { dy }
-        }
-        Some("k") => {
-            // Keypress
-            let code = event["c"].as_u64().unwrap_or(0) as u16;
-            let pressed = event["d"].as_bool().unwrap_or(false);
-            InputCommand::Key { code, pressed }
-        }
+        Some("mm") => InputCommand::MouseMove {
+            dx: event["x"].as_i64().unwrap_or(0) as i32,
+            dy: event["y"].as_i64().unwrap_or(0) as i32,
+        },
+        Some("mb") => InputCommand::MouseButton {
+            button: event["b"].as_u64().unwrap_or(0) as u8,
+            pressed: event["d"].as_bool().unwrap_or(false),
+        },
+        Some("mw") => InputCommand::MouseScroll {
+            dy: event["dy"].as_i64().unwrap_or(0) as i32,
+        },
+        Some("k") => InputCommand::Key {
+            code: event["c"].as_u64().unwrap_or(0) as u16,
+            pressed: event["d"].as_bool().unwrap_or(false),
+        },
         _ => return,
     };
-
     if let Err(e) = input_tx.send(cmd).await {
-        trace!("Input channel cheio ou fechado: {}", e);
+        warn!("Input channel fechado: {}", e);
     }
 }
 
-/// Pipeline assíncrono: lê H.264 do FFmpeg e envia à WebRTC track.
+/// Pipeline de vídeo: FFmpeg → RTP UDP → Sample → WebRTC.
 ///
-/// O FFmpeg com `-tune zerolatency` faz flush por frame, então cada
-/// `read()` retorna aproximadamente 1 frame de dados H.264.
+/// Nesta versão o FFmpeg envia RTP via UDP para a porta 5004.
+/// Cada datagrama UDP contém exatamente um pacote RTP do FFmpeg
+/// com o payload H.264 fragmentado (FU-A ou STAP-A).
+///
+/// Para o `TrackLocalStaticSample` funcionar corretamente, precisamos
+/// entregar NAL units completas (frames H.264 completos). Por isso,
+/// nesta abordagem lemos do stdout do FFmpeg usando output de formato h264,
+/// mas com framing correto: detectamos start codes Annex-B e separamos
+/// cada NALU individualmente.
 async fn stream_video(
     track: Arc<TrackLocalStaticSample>,
     is_active: Arc<AtomicBool>,
 ) -> Result<()> {
     let config = CaptureConfig::default();
 
-    // Aguarda um momento para o PeerConnection negociar antes de iniciar FFmpeg
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let (_child, mut stdout) = spawn_ffmpeg(&config)?;
-    // _child é mantido vivo aqui — quando sair do escopo, o processo FFmpeg morre.
-
-    // Buffer para leitura dos frames H.264 (256KB)
-    let mut buf = vec![0u8; 262_144];
     let frame_duration = Duration::from_millis(1000 / config.framerate as u64);
 
-    info!("🎥 Pipeline de vídeo iniciado — aguardando conexão WebRTC...");
+    info!("🎥 Pipeline de vídeo iniciado — lendo frames H.264 do FFmpeg...");
 
+    // Lemos o stream Annex-B do FFmpeg e separamos NAL units pelo start code.
+    // O formato Annex-B usa `00 00 01` ou `00 00 00 01` como delimitador.
+    //
+    // Estratégia: acumulamos bytes num buffer e enviamos a cada vez que
+    // detectamos o início de um novo NAL unit (start code), entregando o
+    // NAL unit anterior completo ao write_sample.
+    let mut ring = Vec::<u8>::with_capacity(1 << 20); // 1MB
+    let mut tmp = vec![0u8; 65536];
     let mut frame_count = 0u64;
-    let mut total_bytes = 0u64;
+
+    // Função auxiliar: encontra o próximo start code no buffer a partir de `from`.
+    fn find_start_code(buf: &[u8], from: usize) -> Option<usize> {
+        if buf.len() < from + 4 {
+            return None;
+        }
+        for i in from..buf.len().saturating_sub(3) {
+            if buf[i] == 0 && buf[i+1] == 0 {
+                if buf[i+2] == 1 {
+                    return Some(i);   // 00 00 01
+                }
+                if i + 3 < buf.len() && buf[i+2] == 0 && buf[i+3] == 1 {
+                    return Some(i);   // 00 00 00 01
+                }
+            }
+        }
+        None
+    }
 
     loop {
-        // Verifica se a conexão ainda está ativa
         if !is_active.load(Ordering::SeqCst) {
-            info!("🛑 Conexão WebRTC encerrada — parando FFmpeg");
+            info!("🛑 Conexão encerrada — parando FFmpeg");
             break;
         }
 
-        // Lê dados do FFmpeg com timeout
-        match tokio::time::timeout(Duration::from_secs(5), stdout.read(&mut buf)).await {
+        match tokio::time::timeout(Duration::from_secs(5), stdout.read(&mut tmp)).await {
             Ok(Ok(0)) => {
-                warn!("FFmpeg encerrou o stdout (processo terminou)");
+                warn!("FFmpeg encerrou o stdout");
                 break;
             }
             Ok(Ok(n)) => {
-                frame_count += 1;
-                total_bytes += n as u64;
+                ring.extend_from_slice(&tmp[..n]);
 
-                if frame_count % 90 == 0 {
-                    info!(
-                        "📊 Stream de vídeo ativo: {} frames enviados (total {} KB lidos)",
-                        frame_count,
-                        total_bytes / 1024
-                    );
+                // Procura pares de start codes para extrair NAL units completas
+                let mut search_from = 0usize;
+                loop {
+                    let first = match find_start_code(&ring, search_from) {
+                        Some(p) => p,
+                        None => break,
+                    };
+
+                    // Avança past o start code para procurar o próximo
+                    let sc_len = if ring.get(first + 2) == Some(&1) { 3 } else { 4 };
+                    let next = match find_start_code(&ring, first + sc_len) {
+                        Some(p) => p,
+                        None => break, // Ainda não temos o fim deste NAL unit
+                    };
+
+                    // Extrai o NAL unit completo (incluindo o start code inicial)
+                    let nalu = Bytes::copy_from_slice(&ring[first..next]);
+                    search_from = next;
+
+                    frame_count += 1;
+                    if frame_count % 90 == 0 {
+                        info!("📊 {} NAL units enviados ao WebRTC", frame_count);
+                    }
+
+                    let sample = Sample {
+                        data: nalu,
+                        duration: frame_duration,
+                        ..Default::default()
+                    };
+
+                    if let Err(e) = track.write_sample(&sample).await {
+                        trace!("write_sample: {}", e);
+                    }
                 }
 
-                // Envia o chunk H.264 como um Sample para a WebRTC track.
-                // O H264Payloader interno do webrtc-rs cuida da packetização RTP.
-                let sample = Sample {
-                    data: Bytes::copy_from_slice(&buf[..n]),
-                    duration: frame_duration,
-                    ..Default::default()
-                };
-                if let Err(e) = track.write_sample(&sample).await {
-                    // Erros aqui são esperados antes da conexão estar estabelecida.
-                    trace!("write_sample: {} (normal antes de conectar)", e);
+                // Remove os dados já processados, mantém o restante
+                if search_from > 0 {
+                    ring.drain(..search_from);
+                }
+
+                // Segurança: se o buffer crescer demais, descartar
+                if ring.len() > 4 * 1024 * 1024 {
+                    warn!("Buffer cresceu demais ({} KB) — descartando", ring.len() / 1024);
+                    ring.clear();
                 }
             }
             Ok(Err(e)) => {
@@ -292,7 +303,7 @@ async fn stream_video(
                 break;
             }
             Err(_) => {
-                warn!("Timeout lendo FFmpeg (5s sem dados)");
+                warn!("Timeout: 5s sem dados do FFmpeg");
                 break;
             }
         }
