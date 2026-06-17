@@ -72,7 +72,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             // Passo 2: inicializa VAAPI derivando do DRM
             "-init_hw_device", "vaapi=va@drm",
             // Informa ao filtro qual device VAAPI usar
-            "-hwaccel_device", "va",
+            "-filter_hw_device", "va",
             // ── Input: DRM/KMS via kmsgrab ─────────────────────────────────────────
             "-f", "kmsgrab",
             "-device", &config.drm_device,
