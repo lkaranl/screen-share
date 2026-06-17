@@ -247,6 +247,9 @@ async fn stream_video(
 
     info!("🎥 Pipeline de vídeo iniciado — aguardando conexão WebRTC...");
 
+    let mut frame_count = 0u64;
+    let mut total_bytes = 0u64;
+
     loop {
         // Verifica se a conexão ainda está ativa
         if !is_active.load(Ordering::SeqCst) {
@@ -261,6 +264,17 @@ async fn stream_video(
                 break;
             }
             Ok(Ok(n)) => {
+                frame_count += 1;
+                total_bytes += n as u64;
+
+                if frame_count % 90 == 0 {
+                    info!(
+                        "📊 Stream de vídeo ativo: {} frames enviados (total {} KB lidos)",
+                        frame_count,
+                        total_bytes / 1024
+                    );
+                }
+
                 // Envia o chunk H.264 como um Sample para a WebRTC track.
                 // O H264Payloader interno do webrtc-rs cuida da packetização RTP.
                 let sample = Sample {

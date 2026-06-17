@@ -82,6 +82,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             "-vf", &vf,
             // ── Codec: H.264 via VAAPI (encode na GPU) ────────────────────────────
             "-c:v", "h264_vaapi",
+            "-bsf:v", "dump_extra=freq=keyframe",
             "-b:v", bitrate,
             "-maxrate", bitrate,
             "-bufsize", "2M",
