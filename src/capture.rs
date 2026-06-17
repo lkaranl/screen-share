@@ -78,9 +78,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             "-sn",
         ])
         .stdout(std::process::Stdio::piped())
-        // Redireciona stderr para /dev/null em produção.
-        // Mude para `std::process::Stdio::inherit()` para debug.
-        .stderr(std::process::Stdio::null())
+        // Redireciona stderr para o console do terminal para podermos debugar o erro do FFmpeg.
+        .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)  // mata FFmpeg quando o Child é dropado
         .spawn()
         .context("Falha ao iniciar ffmpeg. Verifique se ffmpeg está instalado e se tem acesso ao DRM device.")?;
