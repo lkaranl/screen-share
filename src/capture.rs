@@ -19,7 +19,7 @@ impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
             drm_device: std::env::var("DRM_DEVICE")
-                .unwrap_or_else(|_| "/dev/dri/card0".to_string()),
+                .unwrap_or_else(|_| "/dev/dri/card1".to_string()),
             framerate: 30,
             bitrate: "4M".to_string(),
             gop_size: 60, // keyframe a cada 2 segundos @ 30fps
@@ -49,33 +49,36 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
 
     let mut child = Command::new("ffmpeg")
         .args([
-            // ── Input: DRM/KMS via kmsgrab ──────────────────────────────
+            // Suprime o banner e mensagens interativas
+            "-hide_banner",
+            "-loglevel", "warning",
+            // ── Input: DRM/KMS via kmsgrab ──────────────────────────────────
+            // kmsgrab requer o path do DRM device como -i (não stdin)
             "-f", "kmsgrab",
             "-device", &config.drm_device,
             "-framerate", &framerate_str,
-            "-i", "-",  // lê do DRM/KMS (não de um arquivo)
-            // ── Filtros de vídeo ─────────────────────────────────────────
-            // hwdownload: transfere frame da GPU/KMS para memória do sistema
-            // format=bgr0: converte para formato CPU-friendly
+            "-i", &config.drm_device,  // ← correto: path do device, não "-"
+            // ── Filtros de vídeo ─────────────────────────────────────────────
+            // hwdownload: copia o frame DRM (GPU/KMS) para memória do sistema (CPU)
+            // format=bgr0: converte pixel format para CPU-friendly antes do encode
             "-vf", "hwdownload,format=bgr0",
-            // ── Codec H.264 ──────────────────────────────────────────────
+            // ── Codec H.264 ──────────────────────────────────────────────────
             "-pix_fmt", "yuv420p",       // formato suportado por todos os browsers
             "-c:v", "libx264",
             "-preset", "ultrafast",      // menor latência de encoding
             "-tune", "zerolatency",      // flush imediato por frame
-            // ── Bitrate ──────────────────────────────────────────────────
+            // ── Bitrate ──────────────────────────────────────────────────────
             "-b:v", &config.bitrate,
             "-maxrate", &config.bitrate,
             "-bufsize", "2M",
-            // ── GOP (keyframe interval) ───────────────────────────────────
-            "-g", &gop_str,              // keyframe a cada N frames
+            // ── GOP (keyframe interval) ───────────────────────────────────────
+            "-g", &gop_str,
             "-keyint_min", &gop_str,
-            // ── Output: H.264 Annex-B para stdout ────────────────────────
+            // ── Sem áudio/legendas ────────────────────────────────────────────
+            "-an", "-sn",
+            // ── Output: H.264 Annex-B para stdout ────────────────────────────
             "-f", "h264",
             "pipe:1",
-            // Desabilita áudio e legendas
-            "-an",
-            "-sn",
         ])
         .stdout(std::process::Stdio::piped())
         // Redireciona stderr para o console do terminal para podermos debugar o erro do FFmpeg.
