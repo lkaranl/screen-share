@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::Result;
 use bytes::Bytes;
 use tokio::io::AsyncReadExt;
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, warn};
 
 use webrtc::{
     api::{
@@ -267,13 +267,37 @@ async fn stream_video(
                         None => break, // Ainda não temos o fim deste NAL unit
                     };
 
-                    // Extrai o NAL unit completo (incluindo o start code inicial)
-                    let nalu = Bytes::copy_from_slice(&ring[first..next]);
+                    // Determina o tamanho do start code (3 ou 4 bytes)
+                    let sc_len = if ring.get(first + 2) == Some(&1) { 3 } else { 4 };
+                    
+                    // Extrai o NAL unit puro (sem o start code)
+                    let nalu_data = &ring[first + sc_len..next];
+                    if nalu_data.is_empty() {
+                        search_from = next;
+                        continue;
+                    }
+
+                    let nal_type = nalu_data[0] & 0x1F;
+                    let nalu_len = nalu_data.len();
+                    
+                    // Logs detalhados de diagnóstico
+                    match nal_type {
+                        7 => info!("🔑 [SPS] detectado: {} bytes, prefixo: {:02x?}", nalu_len, &nalu_data[..std::cmp::min(5, nalu_len)]),
+                        8 => info!("🔑 [PPS] detectado: {} bytes, prefixo: {:02x?}", nalu_len, &nalu_data[..std::cmp::min(5, nalu_len)]),
+                        5 => info!("🔑 [Keyframe IDR] detectado: {} bytes, prefixo: {:02x?}", nalu_len, &nalu_data[..std::cmp::min(5, nalu_len)]),
+                        _ => {
+                            if frame_count % 90 == 0 {
+                                info!("📦 NALU comum (tipo {}): {} bytes, prefixo: {:02x?}", nal_type, nalu_len, &nalu_data[..std::cmp::min(5, nalu_len)]);
+                            }
+                        }
+                    }
+
+                    let nalu = Bytes::copy_from_slice(nalu_data);
                     search_from = next;
 
                     frame_count += 1;
                     if frame_count % 90 == 0 {
-                        info!("📊 {} NAL units enviados ao WebRTC", frame_count);
+                        info!("📊 {} NAL units processados no total", frame_count);
                     }
 
                     let sample = Sample {
@@ -283,7 +307,7 @@ async fn stream_video(
                     };
 
                     if let Err(e) = track.write_sample(&sample).await {
-                        trace!("write_sample: {}", e);
+                        error!("❌ Erro no write_sample (NALU tipo {}): {}", nal_type, e);
                     }
                 }
 
