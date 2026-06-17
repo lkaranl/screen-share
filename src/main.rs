@@ -40,14 +40,17 @@ async fn main() -> Result<()> {
         .route("/ws", get(signaling::ws_handler))
         .with_state(state);
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let port = std::env::var("PORT").unwrap_or_else(|_| "39482".to_string());
     let addr = format!("0.0.0.0:{}", port);
 
-    info!("🖥️  Screen Share server iniciando em http://{}", addr);
-    info!("📱 Abra http://<IP-DO-SERVIDOR>:{} no browser", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let local_addr = listener.local_addr()?;
+    let actual_port = local_addr.port();
+
+    info!("🖥️  Screen Share server iniciando em http://0.0.0.0:{}", actual_port);
+    info!("📱 Abra http://<IP-DO-SERVIDOR>:{} no browser", actual_port);
     info!("🔑 Precisa rodar como root para kmsgrab funcionar");
 
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
