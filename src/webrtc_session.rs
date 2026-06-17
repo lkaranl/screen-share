@@ -17,7 +17,7 @@ use webrtc::{
     },
     data_channel::{data_channel_message::DataChannelMessage, RTCDataChannel},
     ice_transport::{
-        ice_candidate::{RTCIceCandidate, RTCIceCandidateInit},
+        ice_candidate::RTCIceCandidate,
         ice_server::RTCIceServer,
     },
     interceptor::registry::Registry,
@@ -129,7 +129,7 @@ pub async fn create_session(
         let ice_tx = ice_tx.clone();
         Box::pin(async move {
             if let Some(c) = c {
-                match c.to_json().await {
+                match c.to_json() {
                     Ok(init) => {
                         let msg = serde_json::json!({
                             "type": "ice_candidate",

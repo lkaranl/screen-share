@@ -1,5 +1,4 @@
-use std::sync::Arc;
-use axum::{Router, routing::get, extract::State};
+use axum::{Router, routing::get};
 use tokio::sync::mpsc;
 use tracing::info;
 use anyhow::Result;
