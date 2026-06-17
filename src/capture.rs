@@ -69,7 +69,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             "-c:v", "h264_vaapi",
             // constrained_baseline = máxima compatibilidade com Chrome/Firefox/Safari
             "-profile:v", "constrained_baseline",
-            "-level", "4.0",
+            "-level", "40",
             "-b:v", bitrate,
             "-maxrate", bitrate,
             "-bufsize", "2M",
