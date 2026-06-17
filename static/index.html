@@ -501,9 +501,14 @@ async function connect() {
 
   // Recebe o stream de vídeo do servidor
   pc.ontrack = e => {
-    if (e.streams?.[0]) {
+    console.log('Track de vídeo recebido:', e);
+    if (e.streams && e.streams[0]) {
       video.srcObject = e.streams[0];
       showToast('Stream de vídeo recebido!', '🎥');
+    } else {
+      console.log('Sem stream associado no SDP, criando MediaStream a partir da track...');
+      video.srcObject = new MediaStream([e.track]);
+      showToast('Stream de vídeo recebido (track)!', '🎥');
     }
   };
 
