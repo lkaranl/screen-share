@@ -46,9 +46,10 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     let local_addr = listener.local_addr()?;
     let actual_port = local_addr.port();
+    let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
 
     info!("🖥️  Screen Share server iniciando em http://0.0.0.0:{}", actual_port);
-    info!("📱 Abra http://<IP-DO-SERVIDOR>:{} no browser", actual_port);
+    info!("📱 Abra http://{}:{} no browser", local_ip, actual_port);
     info!("🔑 Precisa rodar como root para kmsgrab funcionar");
 
     axum::serve(listener, app).await?;
@@ -59,4 +60,12 @@ async fn main() -> Result<()> {
 /// Serve o HTML da UI diretamente do binário compilado (sem arquivos externos).
 async fn serve_index() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../static/index.html"))
+}
+
+/// Tenta descobrir o IP local de rede da máquina fazendo uma conexão UDP fictícia.
+fn get_local_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    // Conecta ficticiamente a um IP externo para o SO determinar a interface local padrão
+    socket.connect("8.8.8.8:80").ok()?;
+    Some(socket.local_addr().ok()?.ip().to_string())
 }
