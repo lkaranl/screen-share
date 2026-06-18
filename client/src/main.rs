@@ -215,7 +215,7 @@ fn decode_loop(server_ip: &str, frame_tx: mpsc::Sender<FrameData>) -> Result<()>
     ffmpeg::init()?;
     
     // Configura ffmpeg para baixa latência em conexões de rede
-    let mut dict = ffmpeg::dict::Dictionary::new();
+    let mut dict = ffmpeg::Dictionary::new();
     dict.set("flags", "low_delay");
     dict.set("fflags", "nobuffer");
     dict.set("probesize", "32");
