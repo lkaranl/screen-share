@@ -5,9 +5,12 @@ use sdl2::keyboard::Scancode;
 use sdl2::pixels::PixelFormatEnum;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs;
 use std::io::{BufRead, Write};
 use std::net::TcpStream;
+use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -139,27 +142,236 @@ struct FrameData {
     v_pitch: usize,
 }
 
-fn main() -> Result<()> {
-    sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "best");
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        println!("Usage: {} <server_ip> [--codec <h264|hevc|h265>]", args[0]);
-        return Ok(());
-    }
-    let server_ip = args[1].clone();
+#[derive(Serialize, Deserialize, Default)]
+struct LauncherConfig {
+    last_ip: String,
+    history: Vec<String>,
+}
 
-    // Parse codec hint
-    let mut codec_hint = None;
-    if let Some(pos) = args.iter().position(|x| x == "--codec") {
-        if pos + 1 < args.len() {
-            let codec_str = args[pos + 1].to_lowercase();
-            if codec_str == "hevc" || codec_str == "h265" {
-                codec_hint = Some("hevc".to_string());
-            } else if codec_str == "h264" {
-                codec_hint = Some("h264".to_string());
+impl LauncherConfig {
+    fn get_path() -> Option<PathBuf> {
+        let home = std::env::var("HOME").ok()?;
+        let mut path = PathBuf::from(home);
+        path.push(".config");
+        path.push("rs-view");
+        path.push("config.json");
+        Some(path)
+    }
+
+    fn load() -> Self {
+        if let Some(path) = Self::get_path() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(config) = serde_json::from_str::<LauncherConfig>(&content) {
+                    return config;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    fn save(&self) {
+        if let Some(path) = Self::get_path() {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Ok(content) = serde_json::to_string_pretty(self) {
+                let _ = fs::write(&path, content);
             }
         }
     }
+}
+
+struct LauncherApp {
+    ip: String,
+    history: Vec<String>,
+    selected_ip: Arc<Mutex<Option<String>>>,
+}
+
+impl LauncherApp {
+    fn new(config: &LauncherConfig, selected_ip: Arc<Mutex<Option<String>>>) -> Self {
+        Self {
+            ip: config.last_ip.clone(),
+            history: config.history.clone(),
+            selected_ip,
+        }
+    }
+}
+
+impl eframe::App for LauncherApp {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        eframe::egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(15.0);
+                ui.heading(
+                    eframe::egui::RichText::new("RS-View")
+                        .size(32.0)
+                        .strong()
+                        .color(eframe::egui::Color32::from_rgb(0, 191, 255))
+                );
+                ui.label(
+                    eframe::egui::RichText::new("Compartilhamento de Tela Ultra Latência")
+                        .size(12.0)
+                        .italics()
+                );
+                ui.add_space(20.0);
+            });
+
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.vertical(|ui| {
+                    ui.label(eframe::egui::RichText::new("Endereço IP do Host:").strong());
+                    ui.add_space(5.0);
+                    let text_edit = ui.add(
+                        eframe::egui::TextEdit::singleline(&mut self.ip)
+                            .hint_text("ex: 192.168.1.50")
+                            .desired_width(f32::INFINITY)
+                    );
+                    
+                    if text_edit.lost_focus() && ctx.input(|i| i.key_pressed(eframe::egui::Key::Enter)) {
+                        let ip = self.ip.trim().to_string();
+                        if !ip.is_empty() {
+                            if let Ok(mut lock) = self.selected_ip.lock() {
+                                *lock = Some(ip);
+                            }
+                            ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+                        }
+                    }
+                });
+            });
+
+            ui.add_space(15.0);
+
+            ui.vertical_centered(|ui| {
+                let connect_btn = eframe::egui::Button::new(
+                    eframe::egui::RichText::new("Conectar")
+                        .size(16.0)
+                        .strong()
+                        .color(eframe::egui::Color32::WHITE)
+                )
+                .fill(eframe::egui::Color32::from_rgb(0, 122, 255))
+                .min_size(eframe::egui::vec2(120.0, 35.0));
+
+                if ui.add(connect_btn).clicked() {
+                    let ip = self.ip.trim().to_string();
+                    if !ip.is_empty() {
+                        if let Ok(mut lock) = self.selected_ip.lock() {
+                            *lock = Some(ip);
+                        }
+                        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+                    }
+                }
+            });
+
+            if !self.history.is_empty() {
+                ui.add_space(20.0);
+                ui.separator();
+                ui.add_space(10.0);
+                ui.label(eframe::egui::RichText::new("Últimos Conectados:").strong());
+                ui.add_space(5.0);
+
+                eframe::egui::ScrollArea::vertical().max_height(80.0).show(ui, |ui| {
+                    for prev_ip in &self.history {
+                        ui.horizontal(|ui| {
+                            let btn = eframe::egui::Button::new(
+                                eframe::egui::RichText::new(prev_ip)
+                                    .color(eframe::egui::Color32::from_rgb(180, 180, 180))
+                            )
+                            .frame(false);
+                            
+                            if ui.add(btn).clicked() {
+                                self.ip = prev_ip.clone();
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    }
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    
+    let (server_ip, codec_hint) = if args.len() >= 2 {
+        let ip = args[1].clone();
+        let mut codec = None;
+        if let Some(pos) = args.iter().position(|x| x == "--codec") {
+            if pos + 1 < args.len() {
+                let codec_str = args[pos + 1].to_lowercase();
+                if codec_str == "hevc" || codec_str == "h265" {
+                    codec = Some("hevc".to_string());
+                } else if codec_str == "h264" {
+                    codec = Some("h264".to_string());
+                }
+            }
+        }
+        (Some(ip), codec)
+    } else {
+        let config = LauncherConfig::load();
+        let options = eframe::NativeOptions {
+            viewport: eframe::egui::ViewportBuilder::default()
+                .with_title("RS-View - Conexão")
+                .with_inner_size([350.0, 320.0])
+                .with_resizable(false),
+            ..Default::default()
+        };
+        
+        let selected_ip = Arc::new(Mutex::new(None));
+        let selected_ip_clone = selected_ip.clone();
+        
+        let app = LauncherApp::new(&config, selected_ip_clone);
+        if let Err(e) = eframe::run_native(
+            "RS-View Connection Launcher",
+            options,
+            Box::new(move |cc| {
+                let mut visuals = eframe::egui::Visuals::dark();
+                visuals.window_rounding = 8.0.into();
+                visuals.widgets.active.rounding = 4.0.into();
+                visuals.widgets.hovered.rounding = 4.0.into();
+                visuals.widgets.inactive.rounding = 4.0.into();
+                cc.egui_ctx.set_visuals(visuals);
+                Box::new(app)
+            }),
+        ) {
+            eprintln!("Erro ao iniciar Launcher GUI: {:?}", e);
+            return Err(anyhow::anyhow!("Falha no Launcher GUI"));
+        }
+        
+        let ip_opt = {
+            let lock = selected_ip.lock().unwrap();
+            lock.clone()
+        };
+        
+        if let Some(ip) = ip_opt {
+            let mut new_config = LauncherConfig::load();
+            new_config.last_ip = ip.clone();
+            if !new_config.history.contains(&ip) {
+                new_config.history.insert(0, ip.clone());
+                if new_config.history.len() > 5 {
+                    new_config.history.truncate(5);
+                }
+            } else {
+                if let Some(pos) = new_config.history.iter().position(|x| x == &ip) {
+                    new_config.history.remove(pos);
+                    new_config.history.insert(0, ip.clone());
+                }
+            }
+            new_config.save();
+            (Some(ip), None)
+        } else {
+            (None, None)
+        }
+    };
+
+    if let Some(ip) = server_ip {
+        run_client(ip, codec_hint)?;
+    }
+
+    Ok(())
+}
+
+fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
+    sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "best");
 
     // Init SDL2
     let sdl_context = sdl2::init().map_err(|e| anyhow::anyhow!(e))?;
