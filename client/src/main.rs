@@ -596,7 +596,12 @@ fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Send
         .context("Nenhum stream de video encontrado")?;
     let video_stream_index = input_stream.index();
 
-    let context_decoder = ffmpeg::codec::context::Context::from_parameters(input_stream.parameters())?;
+    let mut context_decoder = ffmpeg::codec::context::Context::from_parameters(input_stream.parameters())?;
+    context_decoder.set_threading(ffmpeg::codec::threading::Config {
+        kind: ffmpeg::codec::threading::Type::None,
+        count: 1,
+    });
+    context_decoder.set_flags(ffmpeg::codec::Flags::LOW_DELAY);
     let mut decoder = context_decoder.decoder().video()?;
 
     let mut scaler = ffmpeg::software::scaling::context::Context::get(
