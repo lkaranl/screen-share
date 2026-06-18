@@ -236,7 +236,7 @@ fn send_cmd(socket: &mut TcpStream, cmd: InputCommand) {
 
 fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Sender<FrameData>) -> Result<()> {
     ffmpeg::init()?;
-    ffmpeg::log::set_level(ffmpeg::log::Level::Trace);
+    ffmpeg::log::set_level(ffmpeg::log::Level::Warning);
 
     if let Some(ref codec) = codec_hint {
         println!("🎥 Iniciando conexão com o servidor. Codec solicitado: {}", codec);

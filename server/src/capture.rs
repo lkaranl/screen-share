@@ -63,7 +63,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
  
     let mut ffmpeg_args = vec![
         "-hide_banner".to_string(),
-        "-loglevel".to_string(), "debug".to_string(),
+        "-loglevel".to_string(), "warning".to_string(),
         // ── Hardware VAAPI ────────────────────────────────────────────────────
         "-init_hw_device".to_string(), format!("drm=drm:{}", config.render_device),
         "-init_hw_device".to_string(), "vaapi=va@drm".to_string(),
