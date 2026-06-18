@@ -34,9 +34,9 @@ impl Default for CaptureConfig {
                 .unwrap_or_else(|_| "/dev/dri/card1".to_string()),
             render_device: std::env::var("RENDER_DEVICE")
                 .unwrap_or_else(|_| "/dev/dri/renderD128".to_string()),
-            framerate: 30,
+            framerate: 60,
             bitrate: "40M".to_string(),
-            gop_size: 30,
+            gop_size: 60,
             codec: VideoCodec::H264,
         }
     }
@@ -83,6 +83,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-c:v".to_string(), "h264_vaapi".to_string(),
                 "-profile:v".to_string(), "constrained_baseline".to_string(),
                 "-level".to_string(), "31".to_string(),
+                "-bf".to_string(), "0".to_string(),
+                "-intra_refresh".to_string(), "1".to_string(),
                 "-b:v".to_string(), bitrate.clone(),
                 "-maxrate".to_string(), bitrate.clone(),
                 "-bufsize".to_string(), "10M".to_string(),
@@ -98,6 +100,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             ffmpeg_args.extend([
                 "-c:v".to_string(), "hevc_vaapi".to_string(),
                 "-bf".to_string(), "0".to_string(),
+                "-intra_refresh".to_string(), "1".to_string(),
                 "-b:v".to_string(), bitrate.clone(),
                 "-maxrate".to_string(), bitrate.clone(),
                 "-bufsize".to_string(), "10M".to_string(),
