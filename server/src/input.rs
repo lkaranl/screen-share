@@ -121,7 +121,7 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
             InputCommand::MouseScroll { dy } => {
                 // REL_WHEEL: positivo = scroll up, negativo = scroll down
                 let _ = mouse.emit(&[
-                    InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_WHEEL.0, -dy),
+                    InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_WHEEL.0, dy),
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
                 ]);
             }

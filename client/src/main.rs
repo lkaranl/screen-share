@@ -20,7 +20,6 @@ pub enum InputCommand {
 
 // Map SDL2 Scancode to Linux Input Event Keycode
 fn map_scancode_to_linux(scancode: Scancode) -> u16 {
-    // Basic mapping, just the essentials for testing
     match scancode {
         Scancode::A => 30,
         Scancode::B => 48,
@@ -63,6 +62,61 @@ fn map_scancode_to_linux(scancode: Scancode) -> u16 {
         Scancode::Backspace => 14,
         Scancode::Tab => 15,
         Scancode::Space => 57,
+
+        // Modificadores
+        Scancode::LShift => 42,
+        Scancode::RShift => 54,
+        Scancode::LCtrl => 29,
+        Scancode::RCtrl => 97,
+        Scancode::LAlt => 56,
+        Scancode::RAlt => 100,
+        Scancode::LGui => 125,
+        Scancode::RGui => 126,
+
+        // Símbolos e Caracteres Especiais
+        Scancode::Minus => 12,
+        Scancode::Equals => 13,
+        Scancode::LeftBracket => 26,
+        Scancode::RightBracket => 27,
+        Scancode::Semicolon => 39,
+        Scancode::Apostrophe => 40,
+        Scancode::Grave => 41,
+        Scancode::Backslash => 43,
+        Scancode::Comma => 51,
+        Scancode::Period => 52,
+        Scancode::Slash => 53,
+
+        // Setas direcionais
+        Scancode::Up => 103,
+        Scancode::Down => 108,
+        Scancode::Left => 105,
+        Scancode::Right => 106,
+
+        // Teclas do Sistema e Navegação
+        Scancode::Insert => 110,
+        Scancode::Delete => 111,
+        Scancode::Home => 102,
+        Scancode::End => 107,
+        Scancode::PageUp => 104,
+        Scancode::PageDown => 109,
+        Scancode::CapsLock => 58,
+        Scancode::NumLockClear => 69,
+        Scancode::ScrollLock => 70,
+
+        // Teclas de Função
+        Scancode::F1 => 59,
+        Scancode::F2 => 60,
+        Scancode::F3 => 61,
+        Scancode::F4 => 62,
+        Scancode::F5 => 63,
+        Scancode::F6 => 64,
+        Scancode::F7 => 65,
+        Scancode::F8 => 66,
+        Scancode::F9 => 67,
+        Scancode::F10 => 68,
+        Scancode::F11 => 87,
+        Scancode::F12 => 88,
+
         _ => 0,
     }
 }
@@ -79,7 +133,7 @@ struct FrameData {
 }
 
 fn main() -> Result<()> {
-    sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "linear");
+    sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "best");
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         println!("Usage: {} <server_ip> [--codec <h264|hevc|h265>]", args[0]);
