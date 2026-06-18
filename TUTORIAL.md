@@ -42,11 +42,18 @@ cargo build --release -p client
 
 ## 3. Inicie o Servidor (No Linux)
 
-O servidor precisa ser executado como Root (para conseguir capturar a placa de vídeo via `kmsgrab` e simular o teclado/mouse virtual):
+O servidor precisa ser executado como Root (para conseguir capturar a placa de vídeo via `kmsgrab` e simular o teclado/mouse virtual). O codec padrão é o H.264, mas você pode usar o H.265 (HEVC) para maior qualidade usando a mesma largura de banda.
 
+Para rodar com o padrão (H.264):
 ```bash
 cd screen-share
 sudo ./target/release/server
+```
+
+Para rodar com suporte a **H.265 / HEVC**:
+```bash
+cd screen-share
+sudo ./target/release/server --codec hevc
 ```
 
 > **Atenção:** O terminal exibirá uma mensagem informando que os servidores TCP subiram (Portas 5000 e 5001) e mostrará o **IP do Linux** na rede local. Anote este IP.
@@ -57,9 +64,16 @@ sudo ./target/release/server
 
 Abra o terminal no seu Mac, vá até a pasta do projeto (caso tenha o código lá) e execute o Cliente passando o IP do Linux que você anotou:
 
+Para conectar no modo padrão (H.264):
 ```bash
 cd screen-share
 cargo run --release -p client -- 192.168.x.x
+```
+
+Para conectar usando o codec **H.265 / HEVC**:
+```bash
+cd screen-share
+cargo run --release -p client -- 192.168.x.x --codec hevc
 ```
 *(Substitua `192.168.x.x` pelo IP anotado)*
 

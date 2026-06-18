@@ -14,6 +14,22 @@ async fn main() -> Result<()> {
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "server=info".to_string()))
         .init();
 
+    // Parse command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    let mut codec = capture::VideoCodec::H264;
+    if let Some(pos) = args.iter().position(|x| x == "--codec") {
+        if pos + 1 < args.len() {
+            match args[pos + 1].to_lowercase().as_str() {
+                "hevc" | "h265" => codec = capture::VideoCodec::HEVC,
+                "av1" => codec = capture::VideoCodec::AV1,
+                "h264" => codec = capture::VideoCodec::H264,
+                other => {
+                    warn!("⚠️ Codec desconhecido '{}', usando padrão H.264", other);
+                }
+            }
+        }
+    }
+
     // Start input handler (uinput virtual devices)
     let input_tx = input::start_input_handler()?;
     info!("✅ Dispositivos virtuais de input criados (mouse + teclado)");
@@ -27,14 +43,14 @@ async fn main() -> Result<()> {
     });
 
     // Run Video TCP Server on main thread
-    run_video_server().await?;
+    run_video_server(codec).await?;
 
     Ok(())
 }
 
-async fn run_video_server() -> Result<()> {
+async fn run_video_server(codec: capture::VideoCodec) -> Result<()> {
     let listener = TcpListener::bind("0.0.0.0:5000").await?;
-    info!("🎥 Servidor de Vídeo (TCP) rodando na porta 5000");
+    info!("🎥 Servidor de Vídeo (TCP) rodando na porta 5000 | Codec: {:?}", codec);
 
     loop {
         match listener.accept().await {
@@ -42,10 +58,11 @@ async fn run_video_server() -> Result<()> {
                 info!("🔗 Cliente conectado no canal de Vídeo: {}", addr);
                 
                 // When a client connects, we start FFmpeg
-                let config = CaptureConfig::default();
+                let mut config = CaptureConfig::default();
+                config.codec = codec;
                 match capture::spawn_ffmpeg(&config) {
                     Ok((mut child, mut stdout)) => {
-                        info!("🎬 FFmpeg iniciado, enviando bytes brutos H.264 para o socket...");
+                        info!("🎬 FFmpeg iniciado ({:?}), enviando bytes brutos para o socket...", codec);
                         
                         // Pipe stdout directly to the TCP socket
                         match tokio::io::copy(&mut stdout, &mut socket).await {

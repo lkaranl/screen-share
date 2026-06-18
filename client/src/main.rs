@@ -81,10 +81,23 @@ struct FrameData {
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        println!("Usage: {} <server_ip>", args[0]);
+        println!("Usage: {} <server_ip> [--codec <h264|hevc|h265>]", args[0]);
         return Ok(());
     }
     let server_ip = args[1].clone();
+
+    // Parse codec hint
+    let mut codec_hint = None;
+    if let Some(pos) = args.iter().position(|x| x == "--codec") {
+        if pos + 1 < args.len() {
+            let codec_str = args[pos + 1].to_lowercase();
+            if codec_str == "hevc" || codec_str == "h265" {
+                codec_hint = Some("hevc".to_string());
+            } else if codec_str == "h264" {
+                codec_hint = Some("h264".to_string());
+            }
+        }
+    }
 
     // Connect to control socket
     let mut control_socket = TcpStream::connect(format!("{}:5001", server_ip))
@@ -109,8 +122,10 @@ fn main() -> Result<()> {
     let (frame_tx, frame_rx) = mpsc::channel::<FrameData>();
 
     // Spawn FFmpeg decode thread
+    let server_ip_clone = server_ip.clone();
+    let codec_hint_clone = codec_hint.clone();
     thread::spawn(move || {
-        if let Err(e) = decode_loop(&server_ip, frame_tx) {
+        if let Err(e) = decode_loop(&server_ip_clone, codec_hint_clone, frame_tx) {
             eprintln!("Erro no decoder FFmpeg: {}", e);
         }
     });
@@ -219,15 +234,21 @@ fn send_cmd(socket: &mut TcpStream, cmd: InputCommand) {
     }
 }
 
-fn decode_loop(server_ip: &str, frame_tx: mpsc::Sender<FrameData>) -> Result<()> {
+fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Sender<FrameData>) -> Result<()> {
     ffmpeg::init()?;
     ffmpeg::log::set_level(ffmpeg::log::Level::Error);
+
+    if let Some(ref codec) = codec_hint {
+        println!("🎥 Iniciando conexão com o servidor. Codec solicitado: {}", codec);
+    } else {
+        println!("🎥 Iniciando conexão com o servidor. Codec padrão: Autodetectar");
+    }
 
     // Configura ffmpeg para baixa latência em conexões de rede
     let mut dict = ffmpeg::Dictionary::new();
     dict.set("flags", "low_delay");
     dict.set("fflags", "nobuffer");
-    dict.set("probesize", "32");
+    dict.set("probesize", "4096");
     dict.set("analyzeduration", "0");
 
     let input_url = format!("tcp://{}:5000", server_ip);

@@ -2,6 +2,14 @@ use anyhow::{Context, Result};
 use tokio::process::{Child, ChildStdout, Command};
 use tracing::info;
 
+/// Codecs de vídeo suportados pelo servidor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VideoCodec {
+    H264,
+    HEVC,
+    AV1,
+}
+
 /// Configuração do pipeline de captura de tela.
 #[derive(Debug, Clone)]
 pub struct CaptureConfig {
@@ -11,10 +19,12 @@ pub struct CaptureConfig {
     pub render_device: String,
     /// Frames por segundo
     pub framerate: u32,
-    /// Bitrate alvo (ex: "4M")
+    /// Bitrate alvo (ex: "8M")
     pub bitrate: String,
     /// Número de frames entre keyframes (GOP)
     pub gop_size: u32,
+    /// Codec de vídeo a ser utilizado
+    pub codec: VideoCodec,
 }
 
 impl Default for CaptureConfig {
@@ -26,7 +36,8 @@ impl Default for CaptureConfig {
                 .unwrap_or_else(|_| "/dev/dri/renderD128".to_string()),
             framerate: 30,
             bitrate: "8M".to_string(),
-            gop_size: 30, // keyframe a cada 1 segundo @ 30fps (mais fácil para browser sincronizar)
+            gop_size: 30,
+            codec: VideoCodec::H264,
         }
     }
 }
@@ -34,7 +45,7 @@ impl Default for CaptureConfig {
 /// Inicia o processo FFmpeg para captura de tela via kmsgrab + VAAPI.
 ///
 /// ## Pipeline FFmpeg (GPU inteiro):
-/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(nv12) → h264_vaapi → H.264 Annex-B → stdout`
+/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(nv12) → codec_vaapi → Annex-B → stdout`
 ///
 /// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo.
 pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
@@ -46,51 +57,84 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
  
     info!(
-        "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={}",
-        config.drm_device, config.render_device, config.framerate, config.bitrate
+        "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={} codec={:?}",
+        config.drm_device, config.render_device, config.framerate, config.bitrate, config.codec
     );
  
+    let mut ffmpeg_args = vec![
+        "-hide_banner".to_string(),
+        "-loglevel".to_string(), "warning".to_string(),
+        // ── Hardware VAAPI ────────────────────────────────────────────────────
+        "-init_hw_device".to_string(), format!("drm=drm:{}", config.render_device),
+        "-init_hw_device".to_string(), "vaapi=va@drm".to_string(),
+        "-filter_hw_device".to_string(), "va".to_string(),
+        // ── Input: kmsgrab DRM/KMS ────────────────────────────────────────────
+        "-f".to_string(), "kmsgrab".to_string(),
+        "-device".to_string(), config.drm_device.clone(),
+        "-framerate".to_string(), framerate_str,
+        "-i".to_string(), config.drm_device.clone(),
+        // ── Filtros GPU ───────────────────────────────────────────────────────
+        "-vf".to_string(), vf,
+    ];
+
+    match config.codec {
+        VideoCodec::H264 => {
+            ffmpeg_args.extend([
+                "-c:v".to_string(), "h264_vaapi".to_string(),
+                "-profile:v".to_string(), "constrained_baseline".to_string(),
+                "-level".to_string(), "31".to_string(),
+                "-b:v".to_string(), bitrate.clone(),
+                "-maxrate".to_string(), bitrate.clone(),
+                "-bufsize".to_string(), "1M".to_string(),
+                "-g".to_string(), gop_str,
+                "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
+                "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
+                "-an".to_string(),
+                "-f".to_string(), "h264".to_string(),
+                "pipe:1".to_string(),
+            ]);
+        }
+        VideoCodec::HEVC => {
+            ffmpeg_args.extend([
+                "-c:v".to_string(), "hevc_vaapi".to_string(),
+                "-b:v".to_string(), bitrate.clone(),
+                "-maxrate".to_string(), bitrate.clone(),
+                "-bufsize".to_string(), "1M".to_string(),
+                "-g".to_string(), gop_str,
+                "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
+                "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
+                "-an".to_string(),
+                "-f".to_string(), "hevc".to_string(),
+                "pipe:1".to_string(),
+            ]);
+        }
+        VideoCodec::AV1 => {
+            // TODO: Suporte para codificação de hardware AV1 (av1_vaapi).
+            // Atualmente, o hardware do servidor (RX 5600 XT / i5 7600k) não possui suporte físico de hardware.
+            // Quando fizer upgrade de GPU para uma compatível com AV1 encoding, basta descomentar a lógica abaixo:
+            /*
+            ffmpeg_args.extend([
+                "-c:v".to_string(), "av1_vaapi".to_string(),
+                "-b:v".to_string(), bitrate.clone(),
+                "-maxrate".to_string(), bitrate.clone(),
+                "-bufsize".to_string(), "1M".to_string(),
+                "-g".to_string(), gop_str,
+                "-an".to_string(),
+                "-f".to_string(), "av1".to_string(),
+                "pipe:1".to_string(),
+            ]);
+            */
+            return Err(anyhow::anyhow!("O codec AV1 não é suportado pelo hardware deste servidor. Por favor, use H.264 ou HEVC."));
+        }
+    }
+
     let mut child = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel", "warning",
-            // ── Hardware VAAPI ────────────────────────────────────────────────────
-            "-init_hw_device", &format!("drm=drm:{}", config.render_device),
-            "-init_hw_device", "vaapi=va@drm",
-            "-filter_hw_device", "va",
-            // ── Input: kmsgrab DRM/KMS ────────────────────────────────────────────
-            "-f", "kmsgrab",
-            "-device", &config.drm_device,
-            "-framerate", &framerate_str,
-            "-i", &config.drm_device,
-            // ── Filtros GPU ───────────────────────────────────────────────────────
-            "-vf", &vf,
-            // ── Codec H.264 VAAPI ─────────────────────────────────────────────────
-            "-c:v", "h264_vaapi",
-            // constrained_baseline = máxima compatibilidade com Chrome/Firefox/Safari
-            "-profile:v", "constrained_baseline",
-            "-level", "31",
-            "-b:v", bitrate,
-            "-maxrate", bitrate,
-            "-bufsize", "1M",
-            // Keyframe frequente: a cada 30 frames (1 segundo). Assim o browser
-            // consegue iniciar decodificação rapidamente ao se conectar.
-            "-g", &gop_str,
-            "-force_key_frames", "expr:gte(t,n_forced*1)",
-            // dump_extra injeta SPS/PPS em cada IDR frame (in-band headers).
-            // Sem isso, browsers frequentemente ficam com tela preta.
-            "-bsf:v", "dump_extra=freq=keyframe",
-            // ── Sem áudio ─────────────────────────────────────────────────────────
-            "-an",
-            // ── Saída: H.264 Annex-B para stdout ─────────────────────────────────
-            "-f", "h264",
-            "pipe:1",
-        ])
+        .args(&ffmpeg_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .context("Falha ao iniciar ffmpeg com VAAPI. Verifique se h264_vaapi está disponível.")?;
+        .context("Falha ao iniciar ffmpeg com VAAPI. Verifique se o codec selecionado está disponível em hardware.")?;
 
     let stdout = child
         .stdout
