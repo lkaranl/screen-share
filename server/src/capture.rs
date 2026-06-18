@@ -70,8 +70,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             // constrained_baseline = máxima compatibilidade com Chrome/Firefox/Safari
             "-profile:v", "constrained_baseline",
             "-level", "31",
-            "-b:v", "1500k",
-            "-maxrate", "1500k",
+            "-b:v", bitrate,
+            "-maxrate", bitrate,
             "-bufsize", "1M",
             // Keyframe frequente: a cada 30 frames (1 segundo). Assim o browser
             // consegue iniciar decodificação rapidamente ao se conectar.
