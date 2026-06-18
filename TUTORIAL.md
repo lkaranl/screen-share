@@ -5,10 +5,10 @@ Siga este passo a passo direto ao ponto para conectar as máquinas.
 ## 1. Prepare as Máquinas (Dependências)
 
 **No Linux (A máquina que vai ser controlada):**
-Verifique se o `ffmpeg` está instalado e tem suporte a VAAPI:
+Verifique se o `ffmpeg` e o `unclutter` (usado para ocultar o cursor remoto) estão instalados:
 ```bash
 sudo apt update
-sudo apt install ffmpeg
+sudo apt install ffmpeg unclutter
 ```
 
 **No seu Mac (A máquina que vai visualizar):**

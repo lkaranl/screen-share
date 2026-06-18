@@ -102,6 +102,41 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                 let _ = socket.set_nodelay(true);
                 let input_tx = input_tx.clone();
 
+                // Detecção das variáveis da sessão do usuário logado para interagir com o X11 (unclutter)
+                let username = std::env::var("SUDO_USER")
+                    .or_else(|_| std::env::var("USER"))
+                    .unwrap_or_else(|_| "servidor".to_string());
+                let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
+                let home_dir = if username == "root" {
+                    "/root".to_string()
+                } else {
+                    format!("/home/{}", username)
+                };
+                let xauthority = format!("{}/.Xauthority", home_dir);
+
+                // Executa unclutter como o usuário comum para ocultar o cursor nativo no X11
+                let unclutter_child = if username != "root" {
+                    std::process::Command::new("sudo")
+                        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "unclutter", "-idle", "0"])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .ok()
+                } else {
+                    std::process::Command::new("unclutter")
+                        .args(&["-idle", "0"])
+                        .env("DISPLAY", &display)
+                        .env("XAUTHORITY", &xauthority)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .ok()
+                };
+
+                if unclutter_child.is_some() {
+                    info!("🖱️  Ocultando cursor do mouse remoto usando unclutter...");
+                }
+
                 tokio::spawn(async move {
                     let (read_half, mut write_half) = tokio::io::split(socket);
                     let mut reader = BufReader::new(read_half);
@@ -152,6 +187,13 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                                 break;
                             }
                         }
+                    }
+
+                    // Reexibe o cursor remoto do mouse matando o unclutter
+                    if let Some(mut child) = unclutter_child {
+                        info!("🖱️  Reexibindo cursor do mouse remoto...");
+                        let _ = child.kill();
+                        let _ = child.wait();
                     }
                 });
             }
