@@ -568,7 +568,7 @@ fn send_cmd(socket: &mut TcpStream, cmd: InputCommand) {
     }
 }
 
-fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Sender<FrameData>) -> Result<()> {
+fn decode_loop(_server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Sender<FrameData>) -> Result<()> {
     ffmpeg::init()?;
     ffmpeg::log::set_level(ffmpeg::log::Level::Warning);
 
@@ -587,7 +587,7 @@ fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Send
     dict.set("probesize", "131072");
     dict.set("analyzeduration", "0");
 
-    let input_url = format!("tcp://{}:5000", server_ip);
+    let input_url = "udp://0.0.0.0:5000?fifo_size=1000000&overrun_nonfatal=1".to_string();
     let mut ictx = ffmpeg::format::input_with_dictionary(&input_url, dict)?;
 
     let input_stream = ictx

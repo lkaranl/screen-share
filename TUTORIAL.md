@@ -56,7 +56,7 @@ cd screen-share
 sudo ./target/release/server --codec hevc
 ```
 
-> **Atenção:** O terminal exibirá uma mensagem informando que os servidores TCP subiram (Portas 5000 e 5001) e mostrará o **IP do Linux** na rede local. Anote este IP.
+> **Atenção:** O terminal exibirá uma mensagem informando que o servidor de controle (TCP) subiu na porta 5001. O vídeo será enviado por UDP na porta 5000 diretamente para o IP do cliente conectado. O terminal também exibirá o **IP do Linux** na rede local. Anote este IP.
 
 ---
 

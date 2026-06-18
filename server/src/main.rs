@@ -34,76 +34,42 @@ async fn main() -> Result<()> {
     let input_tx = input::start_input_handler()?;
     info!("✅ Dispositivos virtuais de input criados (mouse + teclado)");
 
-    // Spawn Input/Control TCP Server
-    let input_tx_clone = input_tx.clone();
-    tokio::spawn(async move {
-        if let Err(e) = run_control_server(input_tx_clone).await {
-            error!("Erro no servidor de controle: {}", e);
-        }
-    });
-
-    // Run Video TCP Server on main thread
-    run_video_server(codec).await?;
+    // Run Control Server (which spawns the UDP video stream per client)
+    run_control_server(input_tx, codec).await?;
 
     Ok(())
 }
 
-async fn run_video_server(codec: capture::VideoCodec) -> Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:5000").await?;
-    info!("🎥 Servidor de Vídeo (TCP) rodando na porta 5000 | Codec: {:?}", codec);
+async fn run_control_server(input_tx: input::InputSender, codec: capture::VideoCodec) -> Result<()> {
+    let listener = TcpListener::bind("0.0.0.0:5001").await?;
+    info!("🎮 Servidor de Controle (TCP) e Vídeo (UDP) rodando na porta 5001");
 
     loop {
         match listener.accept().await {
-            Ok((mut socket, addr)) => {
-                info!("🔗 Cliente conectado no canal de Vídeo: {}", addr);
-                
-                // When a client connects, we start FFmpeg
+            Ok((socket, addr)) => {
+                info!("🔗 Cliente conectado no canal de Controle: {}", addr);
+                let _ = socket.set_nodelay(true);
+                let input_tx = input_tx.clone();
+                let client_ip = addr.ip().to_string();
+
+                // Iniciar FFmpeg transmitindo via UDP diretamente para o IP do cliente conectado
                 let mut config = CaptureConfig::default();
                 config.codec = codec;
-                match capture::spawn_ffmpeg(&config) {
-                    Ok((mut child, mut stdout)) => {
-                        info!("🎬 FFmpeg iniciado ({:?}), enviando bytes brutos para o socket...", codec);
-                        
-                        // Pipe stdout directly to the TCP socket
-                        match tokio::io::copy(&mut stdout, &mut socket).await {
-                            Ok(bytes) => {
-                                info!("⏹️  Conexão de vídeo encerrada. Bytes enviados: {}", bytes);
-                            }
-                            Err(e) => {
-                                warn!("⚠️  Conexão de vídeo interrompida: {}", e);
-                            }
-                        }
+                let output_url = format!("udp://{}:5000?pkt_size=1316&buffer_size=65535", client_ip);
 
-                        // Kill ffmpeg when client disconnects
-                        info!("🛑 Matando FFmpeg...");
-                        let _ = child.kill().await;
-                        let _ = child.wait().await;
+                let mut ffmpeg_child = match capture::spawn_ffmpeg(&config, &output_url) {
+                    Ok(child) => {
+                        info!("🎥 Stream UDP de vídeo iniciado direcionado para {}:5000", client_ip);
+                        Some(child)
                     }
                     Err(e) => {
-                        error!("❌ Falha ao iniciar FFmpeg: {}", e);
+                        error!("❌ Falha ao iniciar FFmpeg UDP: {}", e);
+                        None
                     }
-                }
-            }
-            Err(e) => {
-                error!("❌ Erro ao aceitar conexão TCP: {}", e);
-            }
-        }
-    }
-}
+                };
 
-async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:5001").await?;
-    info!("🎮 Servidor de Controle (TCP) rodando na porta 5001");
-
-        loop {
-            match listener.accept().await {
-                Ok((socket, addr)) => {
-                    info!("🔗 Cliente conectado no canal de Controle: {}", addr);
-                    let _ = socket.set_nodelay(true);
-                    let input_tx = input_tx.clone();
-
-                    tokio::spawn(async move {
-                        let (read_half, mut write_half) = tokio::io::split(socket);
+                tokio::spawn(async move {
+                    let (read_half, mut write_half) = tokio::io::split(socket);
                     let mut reader = BufReader::new(read_half);
                     let mut line = String::new();
 
@@ -129,7 +95,6 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                                             }
                                             input::InputCommand::ClipboardPaste { text } => {
                                                 let _ = input::set_remote_clipboard(&text);
-                                                // Simula Ctrl + V no teclado virtual com pequeno intervalo
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 29, pressed: true }).await;
                                                 tokio::time::sleep(std::time::Duration::from_millis(15)).await;
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 47, pressed: true }).await;
@@ -153,6 +118,14 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                                 break;
                             }
                         }
+                    }
+
+                    // Encerra o stream de vídeo associado
+                    if let Some(mut child) = ffmpeg_child.take() {
+                        info!("🛑 Encerrando stream de vídeo UDP...");
+                        let _ = child.kill().await;
+                        let _ = child.wait().await;
+                        info!("✅ Stream UDP finalizado.");
                     }
                 });
             }
