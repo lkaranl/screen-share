@@ -113,7 +113,11 @@ fn main() -> Result<()> {
         .resizable()
         .build()?;
 
-    let mut canvas = window.into_canvas().build()?;
+    let mut canvas = window
+        .into_canvas()
+        .accelerated()
+        .present_vsync()
+        .build()?;
     let texture_creator = canvas.texture_creator();
     
     // We will initialize the texture when we receive the first frame.
@@ -193,6 +197,7 @@ fn main() -> Result<()> {
         }
 
         // Render any available frames
+        let mut has_new_frame = false;
         while let Ok(frame) = frame_rx.try_recv() {
             if texture.is_none() || texture.as_ref().unwrap().query().width != frame.width || texture.as_ref().unwrap().query().height != frame.height {
                 // Ajusta o tamanho da janela do SDL2 para corresponder ao vídeo nativo do servidor
@@ -212,13 +217,16 @@ fn main() -> Result<()> {
                     &frame.u, frame.u_pitch,
                     &frame.v, frame.v_pitch,
                 ).unwrap();
+                has_new_frame = true;
             }
         }
 
-        if let Some(tex) = texture.as_ref() {
-            canvas.clear();
-            canvas.copy(tex, None, None).unwrap();
-            canvas.present();
+        if has_new_frame {
+            if let Some(tex) = texture.as_ref() {
+                canvas.clear();
+                canvas.copy(tex, None, None).unwrap();
+                canvas.present();
+            }
         }
 
         thread::sleep(std::time::Duration::from_millis(2));
