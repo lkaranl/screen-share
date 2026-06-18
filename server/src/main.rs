@@ -95,14 +95,15 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
     let listener = TcpListener::bind("0.0.0.0:5001").await?;
     info!("🎮 Servidor de Controle (TCP) rodando na porta 5001");
 
-    loop {
-        match listener.accept().await {
-            Ok((socket, addr)) => {
-                info!("🔗 Cliente conectado no canal de Controle: {}", addr);
-                let input_tx = input_tx.clone();
+        loop {
+            match listener.accept().await {
+                Ok((socket, addr)) => {
+                    info!("🔗 Cliente conectado no canal de Controle: {}", addr);
+                    let _ = socket.set_nodelay(true);
+                    let input_tx = input_tx.clone();
 
-                tokio::spawn(async move {
-                    let (read_half, mut write_half) = tokio::io::split(socket);
+                    tokio::spawn(async move {
+                        let (read_half, mut write_half) = tokio::io::split(socket);
                     let mut reader = BufReader::new(read_half);
                     let mut line = String::new();
 

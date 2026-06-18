@@ -380,6 +380,7 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
     // Connect to control socket
     let mut control_socket = TcpStream::connect(format!("{}:5001", server_ip))
         .context("Falha ao conectar no socket de controle")?;
+    let _ = control_socket.set_nodelay(true);
     let control_socket_read = control_socket.try_clone()
         .context("Falha ao clonar socket de controle")?;
 

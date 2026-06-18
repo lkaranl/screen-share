@@ -62,19 +62,29 @@ sudo ./target/release/server --codec hevc
 
 ## 4. Conecte o Cliente (No Mac)
 
-Abra o terminal no seu Mac, vá até a pasta do projeto (caso tenha o código lá) e execute o Cliente passando o IP do Linux que você anotou:
+Abra o terminal no seu Mac e vá até a pasta do projeto.
+
+### Método 1: Usando a Interface Gráfica (Recomendado)
+Para abrir o Launcher gráfico (onde você pode salvar o IP e selecionar itens do histórico):
+```bash
+./target/release/client
+```
+Uma janela gráfica se abrirá. Basta inserir o IP do host Linux e pressionar `Enter` ou clicar em **Conectar**.
+
+### Método 2: Conexão Direta (Via CLI)
+Se preferir pular a interface gráfica e iniciar a conexão diretamente pelo terminal:
 
 Para conectar no modo padrão (H.264):
 ```bash
-cd screen-share
-cargo run --release -p client -- 192.168.x.x
+./target/release/client 192.168.x.x
 ```
 
 Para conectar usando o codec **H.265 / HEVC**:
 ```bash
-cd screen-share
-cargo run --release -p client -- 192.168.x.x --codec hevc
+./target/release/client 192.168.x.x --codec hevc
 ```
 *(Substitua `192.168.x.x` pelo IP anotado)*
 
-**Pronto!** Uma janela do RS-View abrirá instantaneamente mostrando o vídeo do seu Linux, e todos os seus cliques e teclas serão enviados automaticamente.
+**Pronto!** O RS-View abrirá a janela de visualização do seu Linux, permitindo controle completo com mouse, teclado e sincronização bidirecional de clipboard.
+
+cargo run --release -p client -- 192.168.68.51 --codec hevc
