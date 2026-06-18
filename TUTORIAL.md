@@ -21,11 +21,22 @@ brew install sdl2 ffmpeg
 
 ## 2. Compile o Projeto
 
-Em qualquer máquina onde o código fonte estiver baixado, na raiz do projeto, rode:
+Em qualquer máquina onde o código fonte estiver baixado, na raiz do projeto, rode para compilar ambos ao mesmo tempo:
 ```bash
 cargo build --release --workspace
 ```
-*Isso vai compilar tanto a pasta `server` quanto a pasta `client` ao mesmo tempo.*
+
+**Caso queira compilar separadamente (por exemplo, compilar só o servidor no Linux e só o cliente no Mac):**
+
+Para compilar apenas o Servidor:
+```bash
+cargo build --release -p server
+```
+
+Para compilar apenas o Cliente:
+```bash
+cargo build --release -p client
+```
 
 ---
 
