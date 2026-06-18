@@ -1,7 +1,7 @@
 use anyhow::Result;
 use evdev::{
-    uinput::VirtualDeviceBuilder,
-    AttributeSet, EventType, InputEvent, Key, RelativeAxisType,
+    uinput::VirtualDeviceBuilder, AbsInfo, AbsoluteAxisType, AttributeSet, EventType, InputEvent,
+    Key, RelativeAxisType, UinputAbsSetup,
 };
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -11,8 +11,8 @@ use serde::{Serialize, Deserialize};
 /// Comandos de input enviados do WebRTC DataChannel para o thread uinput.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum InputCommand {
-    /// Movimento relativo do mouse (delta x, delta y)
-    MouseMove { dx: i32, dy: i32 },
+    /// Movimento absoluto do mouse (x, y normalizados de 0 a 32767)
+    MouseMove { x: i32, y: i32 },
     /// Botão do mouse (0=esquerdo, 1=meio, 2=direito)
     MouseButton { button: u8, pressed: bool },
     /// Scroll do mouse (positivo = para baixo)
@@ -52,16 +52,27 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
     mouse_keys.insert(Key::BTN_SIDE);
     mouse_keys.insert(Key::BTN_EXTRA);
 
-    let mut mouse_axes = AttributeSet::<RelativeAxisType>::new();
-    mouse_axes.insert(RelativeAxisType::REL_X);
-    mouse_axes.insert(RelativeAxisType::REL_Y);
-    mouse_axes.insert(RelativeAxisType::REL_WHEEL);
-    mouse_axes.insert(RelativeAxisType::REL_HWHEEL);
+    // Eixos relativos para scroll
+    let mut mouse_rel_axes = AttributeSet::<RelativeAxisType>::new();
+    mouse_rel_axes.insert(RelativeAxisType::REL_WHEEL);
+    mouse_rel_axes.insert(RelativeAxisType::REL_HWHEEL);
+
+    // Eixos absolutos para X e Y (0 a 32767)
+    let abs_x = UinputAbsSetup::new(
+        AbsoluteAxisType::ABS_X,
+        AbsInfo::new(0, 0, 32767, 0, 0, 0),
+    );
+    let abs_y = UinputAbsSetup::new(
+        AbsoluteAxisType::ABS_Y,
+        AbsInfo::new(0, 0, 32767, 0, 0, 0),
+    );
 
     let mut mouse = VirtualDeviceBuilder::new()?
         .name("screen-share-virtual-mouse")
         .with_keys(&mouse_keys)?
-        .with_relative_axes(&mouse_axes)?
+        .with_relative_axes(&mouse_rel_axes)?
+        .with_absolute_axis(&abs_x)?
+        .with_absolute_axis(&abs_y)?
         .build()?;
 
     info!("🖱️  Mouse virtual criado");
@@ -84,10 +95,10 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
     // ── Loop de eventos ─────────────────────────────────────────────────
     while let Some(cmd) = rx.blocking_recv() {
         match cmd {
-            InputCommand::MouseMove { dx, dy } => {
+            InputCommand::MouseMove { x, y } => {
                 let _ = mouse.emit(&[
-                    InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_X.0, dx),
-                    InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_Y.0, dy),
+                    InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_X.0, x),
+                    InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_Y.0, y),
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
                 ]);
             }

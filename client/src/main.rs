@@ -12,7 +12,7 @@ use std::thread;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum InputCommand {
-    MouseMove { dx: i32, dy: i32 },
+    MouseMove { x: i32, y: i32 },
     MouseButton { button: u8, pressed: bool },
     MouseScroll { dy: i32 },
     Key { code: u16, pressed: bool },
@@ -124,8 +124,13 @@ fn main() -> Result<()> {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
-                Event::MouseMotion { xrel, yrel, .. } => {
-                    send_cmd(&mut control_socket, InputCommand::MouseMove { dx: xrel, dy: yrel });
+                Event::MouseMotion { x, y, .. } => {
+                    let (win_w, win_h) = canvas.window().size();
+                    if win_w > 0 && win_h > 0 {
+                        let norm_x = (x as f64 / win_w as f64 * 32767.0) as i32;
+                        let norm_y = (y as f64 / win_h as f64 * 32767.0) as i32;
+                        send_cmd(&mut control_socket, InputCommand::MouseMove { x: norm_x, y: norm_y });
+                    }
                 }
                 Event::MouseButtonDown { mouse_btn, .. } => {
                     let btn = match mouse_btn {
