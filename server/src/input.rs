@@ -5,6 +5,8 @@ use evdev::{
 };
 use tokio::sync::mpsc;
 use tracing::{error, info};
+use std::process::Command;
+use std::io::Write;
 
 use serde::{Serialize, Deserialize};
 
@@ -19,6 +21,131 @@ pub enum InputCommand {
     MouseScroll { dy: i32 },
     /// Tecla do teclado (keycode Linux)
     Key { code: u16, pressed: bool },
+    /// Sincronizar texto para colar
+    ClipboardPaste { text: String },
+    /// Requisitar texto copiado
+    ClipboardRequest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ControlResponse {
+    ClipboardSync { text: String },
+}
+
+fn get_user_uid(username: &str) -> String {
+    let output = Command::new("id")
+        .args(&["-u", username])
+        .output();
+    if let Ok(out) = output {
+        if out.status.success() {
+            if let Ok(uid_str) = String::from_utf8(out.stdout) {
+                return uid_str.trim().to_string();
+            }
+        }
+    }
+    "1000".to_string()
+}
+
+pub fn set_remote_clipboard(text: &str) -> Result<()> {
+    let username = std::env::var("SUDO_USER").unwrap_or_else(|_| "karan".to_string());
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
+    let xauthority = format!("/home/{}/.Xauthority", username);
+    let uid = get_user_uid(&username);
+
+    // Tenta xclip
+    let child = Command::new("sudo")
+        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xclip", "-selection", "clipboard"])
+        .stdin(std::process::Stdio::piped())
+        .spawn();
+
+    if let Ok(mut c) = child {
+        if let Some(mut stdin) = c.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if c.wait().is_ok() {
+            return Ok(());
+        }
+    }
+
+    // Tenta xsel
+    let child = Command::new("sudo")
+        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xsel", "-ib"])
+        .stdin(std::process::Stdio::piped())
+        .spawn();
+
+    if let Ok(mut c) = child {
+        if let Some(mut stdin) = c.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if c.wait().is_ok() {
+            return Ok(());
+        }
+    }
+
+    // Tenta wl-copy (Wayland)
+    let child = Command::new("sudo")
+        .args(&["-u", &username, "env", &format!("XDG_RUNTIME_DIR=/run/user/{}", uid), "wl-copy"])
+        .stdin(std::process::Stdio::piped())
+        .spawn();
+
+    if let Ok(mut c) = child {
+        if let Some(mut stdin) = c.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if c.wait().is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err(anyhow::anyhow!("Nenhum utilitário de clipboard funcional encontrado"))
+}
+
+pub fn get_remote_clipboard() -> Result<String> {
+    let username = std::env::var("SUDO_USER").unwrap_or_else(|_| "karan".to_string());
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
+    let xauthority = format!("/home/{}/.Xauthority", username);
+    let uid = get_user_uid(&username);
+
+    // Tenta xclip
+    let output = Command::new("sudo")
+        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xclip", "-selection", "clipboard", "-o"])
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            if let Ok(text) = String::from_utf8(out.stdout) {
+                return Ok(text);
+            }
+        }
+    }
+
+    // Tenta xsel
+    let output = Command::new("sudo")
+        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xsel", "-ob"])
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            if let Ok(text) = String::from_utf8(out.stdout) {
+                return Ok(text);
+            }
+        }
+    }
+
+    // Tenta wl-paste (Wayland)
+    let output = Command::new("sudo")
+        .args(&["-u", &username, "env", &format!("XDG_RUNTIME_DIR=/run/user/{}", uid), "wl-paste", "-n"])
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            if let Ok(text) = String::from_utf8(out.stdout) {
+                return Ok(text);
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!("Não foi possível obter o clipboard"))
 }
 
 /// Tipo público para o sender de input (Send + Sync para uso em callbacks WebRTC).
@@ -135,6 +262,8 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
                 ]);
             }
+
+            InputCommand::ClipboardPaste { .. } | InputCommand::ClipboardRequest => {}
         }
     }
 

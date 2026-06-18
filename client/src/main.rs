@@ -5,7 +5,7 @@ use sdl2::keyboard::Scancode;
 use sdl2::pixels::PixelFormatEnum;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::net::TcpStream;
 use std::sync::mpsc;
 use std::thread;
@@ -16,6 +16,13 @@ pub enum InputCommand {
     MouseButton { button: u8, pressed: bool },
     MouseScroll { dy: i32 },
     Key { code: u16, pressed: bool },
+    ClipboardPaste { text: String },
+    ClipboardRequest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ControlResponse {
+    ClipboardSync { text: String },
 }
 
 // Map SDL2 Scancode to Linux Input Event Keycode
@@ -154,13 +161,32 @@ fn main() -> Result<()> {
         }
     }
 
-    // Connect to control socket
-    let mut control_socket = TcpStream::connect(format!("{}:5001", server_ip))
-        .context("Falha ao conectar no socket de controle")?;
-
     // Init SDL2
     let sdl_context = sdl2::init().map_err(|e| anyhow::anyhow!(e))?;
     let video_subsystem = sdl_context.video().map_err(|e| anyhow::anyhow!(e))?;
+
+    // Connect to control socket
+    let mut control_socket = TcpStream::connect(format!("{}:5001", server_ip))
+        .context("Falha ao conectar no socket de controle")?;
+    let control_socket_read = control_socket.try_clone()
+        .context("Falha ao clonar socket de controle")?;
+
+    let (clipboard_tx, clipboard_rx) = mpsc::channel::<String>();
+    thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(control_socket_read);
+        let mut line = String::new();
+        while let Ok(n) = reader.read_line(&mut line) {
+            if n == 0 { break; }
+            if let Ok(resp) = serde_json::from_str::<ControlResponse>(&line) {
+                match resp {
+                    ControlResponse::ClipboardSync { text } => {
+                        let _ = clipboard_tx.send(text);
+                    }
+                }
+            }
+            line.clear();
+        }
+    });
 
     let window = video_subsystem
         .window("Screen Share Client", 1280, 720)
@@ -235,16 +261,43 @@ fn main() -> Result<()> {
                 Event::MouseWheel { y, .. } => {
                     send_cmd(&mut control_socket, InputCommand::MouseScroll { dy: y });
                 }
-                Event::KeyDown { scancode: Some(sc), .. } => {
-                    let code = map_scancode_to_linux(sc);
-                    if code > 0 {
-                        send_cmd(&mut control_socket, InputCommand::Key { code, pressed: true });
+                Event::KeyDown { scancode: Some(sc), keymod, .. } => {
+                    let ctrl = keymod.intersects(sdl2::keyboard::Mod::LCTRLMOD | sdl2::keyboard::Mod::RCTRLMOD);
+                    let gui = keymod.intersects(sdl2::keyboard::Mod::LGUIMOD | sdl2::keyboard::Mod::RGUIMOD);
+                    if (ctrl || gui) && sc == Scancode::V {
+                        if let Ok(text) = video_subsystem.clipboard().clipboard_text() {
+                            send_cmd(&mut control_socket, InputCommand::ClipboardPaste { text });
+                        }
+                    } else if (ctrl || gui) && sc == Scancode::C {
+                        // 1. Simula Ctrl + C no servidor Linux
+                        send_cmd(&mut control_socket, InputCommand::Key { code: 29, pressed: true });
+                        send_cmd(&mut control_socket, InputCommand::Key { code: 46, pressed: true });
+                        send_cmd(&mut control_socket, InputCommand::Key { code: 46, pressed: false });
+                        send_cmd(&mut control_socket, InputCommand::Key { code: 29, pressed: false });
+
+                        // 2. Aguarda 150ms e solicita o clipboard remoto
+                        let mut control_socket_clone = control_socket.try_clone().unwrap();
+                        thread::spawn(move || {
+                            thread::sleep(std::time::Duration::from_millis(150));
+                            send_cmd(&mut control_socket_clone, InputCommand::ClipboardRequest);
+                        });
+                    } else {
+                        let code = map_scancode_to_linux(sc);
+                        if code > 0 {
+                            send_cmd(&mut control_socket, InputCommand::Key { code, pressed: true });
+                        }
                     }
                 }
-                Event::KeyUp { scancode: Some(sc), .. } => {
-                    let code = map_scancode_to_linux(sc);
-                    if code > 0 {
-                        send_cmd(&mut control_socket, InputCommand::Key { code, pressed: false });
+                Event::KeyUp { scancode: Some(sc), keymod, .. } => {
+                    let ctrl = keymod.intersects(sdl2::keyboard::Mod::LCTRLMOD | sdl2::keyboard::Mod::RCTRLMOD);
+                    let gui = keymod.intersects(sdl2::keyboard::Mod::LGUIMOD | sdl2::keyboard::Mod::RGUIMOD);
+                    if (ctrl || gui) && (sc == Scancode::V || sc == Scancode::C) {
+                        // Ignora para não enviar V ou C soltos após colar/copiar
+                    } else {
+                        let code = map_scancode_to_linux(sc);
+                        if code > 0 {
+                            send_cmd(&mut control_socket, InputCommand::Key { code, pressed: false });
+                        }
                     }
                 }
                 _ => {}
@@ -282,6 +335,11 @@ fn main() -> Result<()> {
                 canvas.copy(tex, None, None).unwrap();
                 canvas.present();
             }
+        }
+
+        // Sincroniza o clipboard local com o recebido do servidor remota
+        while let Ok(text) = clipboard_rx.try_recv() {
+            let _ = video_subsystem.clipboard().set_clipboard_text(&text);
         }
 
         thread::sleep(std::time::Duration::from_millis(2));

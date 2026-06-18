@@ -1,5 +1,5 @@
 use tokio::net::TcpListener;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, error, warn};
 use anyhow::Result;
 
@@ -102,7 +102,8 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                 let input_tx = input_tx.clone();
 
                 tokio::spawn(async move {
-                    let mut reader = BufReader::new(socket);
+                    let (read_half, mut write_half) = tokio::io::split(socket);
+                    let mut reader = BufReader::new(read_half);
                     let mut line = String::new();
 
                     loop {
@@ -115,7 +116,28 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                             Ok(_) => {
                                 match serde_json::from_str::<input::InputCommand>(&line) {
                                     Ok(cmd) => {
-                                        let _ = input_tx.send(cmd).await;
+                                        match cmd {
+                                            input::InputCommand::ClipboardRequest => {
+                                                if let Ok(text) = input::get_remote_clipboard() {
+                                                    let resp = input::ControlResponse::ClipboardSync { text };
+                                                    if let Ok(mut resp_json) = serde_json::to_string(&resp) {
+                                                        resp_json.push('\n');
+                                                        let _ = write_half.write_all(resp_json.as_bytes()).await;
+                                                    }
+                                                }
+                                            }
+                                            input::InputCommand::ClipboardPaste { text } => {
+                                                let _ = input::set_remote_clipboard(&text);
+                                                // Simula Ctrl + V no teclado virtual
+                                                let _ = input_tx.send(input::InputCommand::Key { code: 29, pressed: true }).await;
+                                                let _ = input_tx.send(input::InputCommand::Key { code: 47, pressed: true }).await;
+                                                let _ = input_tx.send(input::InputCommand::Key { code: 47, pressed: false }).await;
+                                                let _ = input_tx.send(input::InputCommand::Key { code: 29, pressed: false }).await;
+                                            }
+                                            other => {
+                                                let _ = input_tx.send(other).await;
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         warn!("⚠️  Comando JSON inválido: {} | Linha: {}", e, line);
