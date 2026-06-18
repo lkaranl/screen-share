@@ -189,7 +189,7 @@ fn main() -> Result<()> {
     });
 
     let window = video_subsystem
-        .window("Screen Share Client", 1280, 720)
+        .window("RS-View", 1280, 720)
         .position_centered()
         .resizable()
         .build()?;

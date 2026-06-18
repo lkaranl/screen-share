@@ -1,4 +1,4 @@
-# Tutorial Rápido: Como rodar o Screen Share
+# Tutorial Rápido: Como rodar o RS-View
 
 Siga este passo a passo direto ao ponto para conectar as máquinas.
 
@@ -77,4 +77,4 @@ cargo run --release -p client -- 192.168.x.x --codec hevc
 ```
 *(Substitua `192.168.x.x` pelo IP anotado)*
 
-**Pronto!** Uma janela do SDL2 abrirá instantaneamente mostrando o vídeo do seu Linux, e todos os seus cliques e teclas serão enviados automaticamente.
+**Pronto!** Uma janela do RS-View abrirá instantaneamente mostrando o vídeo do seu Linux, e todos os seus cliques e teclas serão enviados automaticamente.
