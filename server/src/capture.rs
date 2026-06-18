@@ -97,6 +97,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         VideoCodec::HEVC => {
             ffmpeg_args.extend([
                 "-c:v".to_string(), "hevc_vaapi".to_string(),
+                "-bf".to_string(), "0".to_string(),
                 "-b:v".to_string(), bitrate.clone(),
                 "-maxrate".to_string(), bitrate.clone(),
                 "-bufsize".to_string(), "1M".to_string(),
