@@ -128,10 +128,13 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                                             }
                                             input::InputCommand::ClipboardPaste { text } => {
                                                 let _ = input::set_remote_clipboard(&text);
-                                                // Simula Ctrl + V no teclado virtual
+                                                // Simula Ctrl + V no teclado virtual com pequeno intervalo
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 29, pressed: true }).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 47, pressed: true }).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 47, pressed: false }).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 29, pressed: false }).await;
                                             }
                                             other => {

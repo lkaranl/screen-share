@@ -47,12 +47,74 @@ fn get_user_uid(username: &str) -> String {
 }
 
 pub fn set_remote_clipboard(text: &str) -> Result<()> {
-    let username = std::env::var("SUDO_USER").unwrap_or_else(|_| "karan".to_string());
+    let username = std::env::var("SUDO_USER")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "servidor".to_string());
     let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
-    let xauthority = format!("/home/{}/.Xauthority", username);
+    let home_dir = if username == "root" {
+        "/root".to_string()
+    } else {
+        format!("/home/{}", username)
+    };
+    let xauthority = format!("{}/.Xauthority", home_dir);
     let uid = get_user_uid(&username);
 
-    // Tenta xclip
+    // Tenta xclip diretamente (com DISPLAY e XAUTHORITY do usuario)
+    let child = Command::new("xclip")
+        .args(&["-selection", "clipboard"])
+        .env("DISPLAY", &display)
+        .env("XAUTHORITY", &xauthority)
+        .stdin(std::process::Stdio::piped())
+        .spawn();
+
+    if let Ok(mut c) = child {
+        if let Some(mut stdin) = c.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if let Ok(status) = c.wait() {
+            if status.success() {
+                return Ok(());
+            }
+        }
+    }
+
+    // Tenta xsel diretamente
+    let child = Command::new("xsel")
+        .args(&["-ib"])
+        .env("DISPLAY", &display)
+        .env("XAUTHORITY", &xauthority)
+        .stdin(std::process::Stdio::piped())
+        .spawn();
+
+    if let Ok(mut c) = child {
+        if let Some(mut stdin) = c.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if let Ok(status) = c.wait() {
+            if status.success() {
+                return Ok(());
+            }
+        }
+    }
+
+    // Tenta wl-copy (Wayland)
+    let child = Command::new("wl-copy")
+        .env("XDG_RUNTIME_DIR", format!("/run/user/{}", uid))
+        .stdin(std::process::Stdio::piped())
+        .spawn();
+
+    if let Ok(mut c) = child {
+        if let Some(mut stdin) = c.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if let Ok(status) = c.wait() {
+            if status.success() {
+                return Ok(());
+            }
+        }
+    }
+
+    // Se falhar diretamente, tenta via sudo -u (fallback legado)
     let child = Command::new("sudo")
         .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xclip", "-selection", "clipboard"])
         .stdin(std::process::Stdio::piped())
@@ -62,38 +124,10 @@ pub fn set_remote_clipboard(text: &str) -> Result<()> {
         if let Some(mut stdin) = c.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());
         }
-        if c.wait().is_ok() {
-            return Ok(());
-        }
-    }
-
-    // Tenta xsel
-    let child = Command::new("sudo")
-        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xsel", "-ib"])
-        .stdin(std::process::Stdio::piped())
-        .spawn();
-
-    if let Ok(mut c) = child {
-        if let Some(mut stdin) = c.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        if c.wait().is_ok() {
-            return Ok(());
-        }
-    }
-
-    // Tenta wl-copy (Wayland)
-    let child = Command::new("sudo")
-        .args(&["-u", &username, "env", &format!("XDG_RUNTIME_DIR=/run/user/{}", uid), "wl-copy"])
-        .stdin(std::process::Stdio::piped())
-        .spawn();
-
-    if let Ok(mut c) = child {
-        if let Some(mut stdin) = c.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        if c.wait().is_ok() {
-            return Ok(());
+        if let Ok(status) = c.wait() {
+            if status.success() {
+                return Ok(());
+            }
         }
     }
 
@@ -101,14 +135,23 @@ pub fn set_remote_clipboard(text: &str) -> Result<()> {
 }
 
 pub fn get_remote_clipboard() -> Result<String> {
-    let username = std::env::var("SUDO_USER").unwrap_or_else(|_| "karan".to_string());
+    let username = std::env::var("SUDO_USER")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "servidor".to_string());
     let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
-    let xauthority = format!("/home/{}/.Xauthority", username);
+    let home_dir = if username == "root" {
+        "/root".to_string()
+    } else {
+        format!("/home/{}", username)
+    };
+    let xauthority = format!("{}/.Xauthority", home_dir);
     let uid = get_user_uid(&username);
 
-    // Tenta xclip
-    let output = Command::new("sudo")
-        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xclip", "-selection", "clipboard", "-o"])
+    // Tenta xclip diretamente
+    let output = Command::new("xclip")
+        .args(&["-selection", "clipboard", "-o"])
+        .env("DISPLAY", &display)
+        .env("XAUTHORITY", &xauthority)
         .output();
 
     if let Ok(out) = output {
@@ -119,9 +162,11 @@ pub fn get_remote_clipboard() -> Result<String> {
         }
     }
 
-    // Tenta xsel
-    let output = Command::new("sudo")
-        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xsel", "-ob"])
+    // Tenta xsel diretamente
+    let output = Command::new("xsel")
+        .args(&["-ob"])
+        .env("DISPLAY", &display)
+        .env("XAUTHORITY", &xauthority)
         .output();
 
     if let Ok(out) = output {
@@ -133,8 +178,22 @@ pub fn get_remote_clipboard() -> Result<String> {
     }
 
     // Tenta wl-paste (Wayland)
+    let output = Command::new("wl-paste")
+        .args(&["-n"])
+        .env("XDG_RUNTIME_DIR", format!("/run/user/{}", uid))
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            if let Ok(text) = String::from_utf8(out.stdout) {
+                return Ok(text);
+            }
+        }
+    }
+
+    // Fallback legado com sudo -u
     let output = Command::new("sudo")
-        .args(&["-u", &username, "env", &format!("XDG_RUNTIME_DIR=/run/user/{}", uid), "wl-paste", "-n"])
+        .args(&["-u", &username, "env", &format!("DISPLAY={}", display), &format!("XAUTHORITY={}", xauthority), "xclip", "-selection", "clipboard", "-o"])
         .output();
 
     if let Ok(out) = output {
