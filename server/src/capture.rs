@@ -102,7 +102,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-bufsize".to_string(), "1M".to_string(),
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
-                "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
+                "-bsf:v".to_string(), "hevc_mp4toannexb,dump_extra=freq=keyframe".to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "hevc".to_string(),
                 "pipe:1".to_string(),
