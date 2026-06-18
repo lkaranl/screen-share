@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use tokio::process::{Child, Command};
+use tokio::process::{Child, ChildStdout, Command};
 use tracing::info;
 
 /// Codecs de vídeo suportados pelo servidor.
@@ -45,10 +45,10 @@ impl Default for CaptureConfig {
 /// Inicia o processo FFmpeg para captura de tela via kmsgrab + VAAPI.
 ///
 /// ## Pipeline FFmpeg (GPU inteiro):
-/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(nv12) → codec_vaapi → Annex-B → UDP`
+/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(nv12) → codec_vaapi → Annex-B → stdout`
 ///
-/// Retorna `Child` — o caller deve manter `Child` vivo.
-pub fn spawn_ffmpeg(config: &CaptureConfig, output_url: &str) -> Result<Child> {
+/// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo.
+pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let gop_str = config.gop_size.to_string();
     let framerate_str = config.framerate.to_string();
     let bitrate = &config.bitrate;
@@ -57,8 +57,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig, output_url: &str) -> Result<Child> {
     let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
  
     info!(
-        "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={} codec={:?} destino={}",
-        config.drm_device, config.render_device, config.framerate, config.bitrate, config.codec, output_url
+        "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={} codec={:?}",
+        config.drm_device, config.render_device, config.framerate, config.bitrate, config.codec
     );
  
     let mut ffmpeg_args = vec![
@@ -91,7 +91,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig, output_url: &str) -> Result<Child> {
                 "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "h264".to_string(),
-                output_url.to_string(),
+                "pipe:1".to_string(),
             ]);
         }
         VideoCodec::HEVC => {
@@ -106,7 +106,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig, output_url: &str) -> Result<Child> {
                 "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "hevc".to_string(),
-                output_url.to_string(),
+                "pipe:1".to_string(),
             ]);
         }
         VideoCodec::AV1 => {
@@ -114,13 +114,18 @@ pub fn spawn_ffmpeg(config: &CaptureConfig, output_url: &str) -> Result<Child> {
         }
     }
  
-    let child = Command::new("ffmpeg")
+    let mut child = Command::new("ffmpeg")
         .args(&ffmpeg_args)
-        .stdout(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
         .context("Falha ao iniciar ffmpeg com VAAPI. Verifique se o codec selecionado está disponível em hardware.")?;
  
-    Ok(child)
+    let stdout = child
+        .stdout
+        .take()
+        .context("FFmpeg não retornou stdout")?;
+ 
+    Ok((child, stdout))
 }
