@@ -248,7 +248,9 @@ fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Send
     let mut dict = ffmpeg::Dictionary::new();
     dict.set("flags", "low_delay");
     dict.set("fflags", "nobuffer");
-    dict.set("probesize", "4096");
+    // HEVC tem frames IDR maiores. probesize 4096 trunca o frame na análise
+    // e causa "Could not find ref". Aumentar para 128KB resolve isso sem atraso.
+    dict.set("probesize", "131072");
     dict.set("analyzeduration", "0");
 
     let input_url = format!("tcp://{}:5000", server_ip);
