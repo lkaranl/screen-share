@@ -51,7 +51,6 @@ impl Default for CaptureConfig {
 pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let gop_str = config.gop_size.to_string();
     let framerate_str = config.framerate.to_string();
-    let bitrate = &config.bitrate;
  
     // Pipeline: mantém frame na GPU via VAAPI, mas sem forçar escala (captura na resolução nativa)
     let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
@@ -84,9 +83,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-profile:v".to_string(), "constrained_baseline".to_string(),
                 "-level".to_string(), "31".to_string(),
                 "-bf".to_string(), "0".to_string(),
-                "-b:v".to_string(), bitrate.clone(),
-                "-maxrate".to_string(), bitrate.clone(),
-                "-bufsize".to_string(), "10M".to_string(),
+                "-qp".to_string(), "20".to_string(),
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
                 "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
@@ -99,9 +96,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             ffmpeg_args.extend([
                 "-c:v".to_string(), "hevc_vaapi".to_string(),
                 "-bf".to_string(), "0".to_string(),
-                "-b:v".to_string(), bitrate.clone(),
-                "-maxrate".to_string(), bitrate.clone(),
-                "-bufsize".to_string(), "10M".to_string(),
+                "-qp".to_string(), "20".to_string(),
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
                 "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
