@@ -25,7 +25,7 @@ impl Default for CaptureConfig {
             render_device: std::env::var("RENDER_DEVICE")
                 .unwrap_or_else(|_| "/dev/dri/renderD128".to_string()),
             framerate: 30,
-            bitrate: "4M".to_string(),
+            bitrate: "8M".to_string(),
             gop_size: 30, // keyframe a cada 1 segundo @ 30fps (mais fácil para browser sincronizar)
         }
     }
@@ -42,8 +42,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let framerate_str = config.framerate.to_string();
     let bitrate = &config.bitrate;
 
-    // Pipeline: mantém frame na GPU via VAAPI
-    let vf = "hwmap=derive_device=vaapi,scale_vaapi=w=1280:h=720:format=nv12".to_string();
+    // Pipeline: mantém frame na GPU via VAAPI, mas sem forçar escala (captura na resolução nativa)
+    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
  
     info!(
         "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={}",

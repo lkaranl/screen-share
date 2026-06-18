@@ -180,6 +180,9 @@ fn main() -> Result<()> {
         // Render any available frames
         while let Ok(frame) = frame_rx.try_recv() {
             if texture.is_none() || texture.as_ref().unwrap().query().width != frame.width || texture.as_ref().unwrap().query().height != frame.height {
+                // Ajusta o tamanho da janela do SDL2 para corresponder ao vídeo nativo do servidor
+                let _ = canvas.window_mut().set_size(frame.width, frame.height);
+
                 texture = Some(texture_creator.create_texture_streaming(
                     PixelFormatEnum::IYUV,
                     frame.width,
@@ -218,7 +221,8 @@ fn send_cmd(socket: &mut TcpStream, cmd: InputCommand) {
 
 fn decode_loop(server_ip: &str, frame_tx: mpsc::Sender<FrameData>) -> Result<()> {
     ffmpeg::init()?;
-    
+    ffmpeg::log::set_level(ffmpeg::log::Level::Error);
+
     // Configura ffmpeg para baixa latência em conexões de rede
     let mut dict = ffmpeg::Dictionary::new();
     dict.set("flags", "low_delay");
