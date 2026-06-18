@@ -103,9 +103,14 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-bufsize".to_string(), "1M".to_string(),
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
-                "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
                 "-an".to_string(),
-                "-f".to_string(), "hevc".to_string(),
+                // MPEG-TS é o container padrão para streaming HEVC em rede.
+                // Diferente do raw Annex B (-f hevc), o MPEG-TS carrega metadados
+                // de codec estruturados (VPS/SPS/PPS no PMT), o que permite ao
+                // decodificador do cliente inicializar corretamente.
+                "-f".to_string(), "mpegts".to_string(),
+                "-muxdelay".to_string(), "0".to_string(),
+                "-muxpreload".to_string(), "0".to_string(),
                 "pipe:1".to_string(),
             ]);
         }

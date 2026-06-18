@@ -248,8 +248,17 @@ fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Send
     let mut dict = ffmpeg::Dictionary::new();
     dict.set("flags", "low_delay");
     dict.set("fflags", "nobuffer");
-    dict.set("probesize", "4096");
-    dict.set("analyzeduration", "0");
+
+    // HEVC usa MPEG-TS como container, que precisa de mais dados de probing
+    // para parsear o PMT e inicializar o decodificador corretamente.
+    // H.264 usa raw Annex B que funciona com probesize mínimo.
+    if codec_hint.as_deref() == Some("hevc") {
+        dict.set("probesize", "65536");
+        dict.set("analyzeduration", "1000000");
+    } else {
+        dict.set("probesize", "4096");
+        dict.set("analyzeduration", "0");
+    }
 
     let input_url = format!("tcp://{}:5000", server_ip);
     let mut ictx = ffmpeg::format::input_with_dictionary(&input_url, dict)?;
