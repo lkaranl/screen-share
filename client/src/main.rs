@@ -79,6 +79,7 @@ struct FrameData {
 }
 
 fn main() -> Result<()> {
+    sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "linear");
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         println!("Usage: {} <server_ip> [--codec <h264|hevc|h265>]", args[0]);

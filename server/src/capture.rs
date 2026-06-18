@@ -35,7 +35,7 @@ impl Default for CaptureConfig {
             render_device: std::env::var("RENDER_DEVICE")
                 .unwrap_or_else(|_| "/dev/dri/renderD128".to_string()),
             framerate: 30,
-            bitrate: "8M".to_string(),
+            bitrate: "40M".to_string(),
             gop_size: 30,
             codec: VideoCodec::H264,
         }
@@ -85,7 +85,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-level".to_string(), "31".to_string(),
                 "-b:v".to_string(), bitrate.clone(),
                 "-maxrate".to_string(), bitrate.clone(),
-                "-bufsize".to_string(), "1M".to_string(),
+                "-bufsize".to_string(), "10M".to_string(),
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
                 "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
@@ -100,7 +100,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-bf".to_string(), "0".to_string(),
                 "-b:v".to_string(), bitrate.clone(),
                 "-maxrate".to_string(), bitrate.clone(),
-                "-bufsize".to_string(), "1M".to_string(),
+                "-bufsize".to_string(), "10M".to_string(),
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*1)".to_string(),
                 "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
