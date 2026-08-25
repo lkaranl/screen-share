@@ -2,57 +2,49 @@
 
 Siga este passo a passo direto ao ponto para conectar as máquinas.
 
+---
+
 ## 1. Prepare as Máquinas (Dependências)
 
 **No Linux (A máquina que vai ser controlada):**
 Verifique se o `ffmpeg` e o `unclutter` (usado para ocultar o cursor remoto) estão instalados:
 ```bash
 sudo apt update
-sudo apt install ffmpeg unclutter
+sudo apt install ffmpeg unclutter libva-drm2 libva-x11-2 libavcodec-extra
 ```
 
 **No seu Mac (A máquina que vai visualizar):**
-Você precisa do SDL2 e das bibliotecas C do FFmpeg para decodificar o vídeo:
-```bash
-brew install sdl2 ffmpeg
-```
+- **Zero dependências externas!** O cliente Swift usa os aceleradores nativos do macOS (`VideoToolbox`, `CoreMedia`, `AVFoundation`, `Network.framework` e `SwiftUI`).
 
 ---
 
-## 2. Compile o Projeto
+## 2. Compile os Componentes
 
-Em qualquer máquina onde o código fonte estiver baixado, na raiz do projeto, rode para compilar ambos ao mesmo tempo:
-```bash
-cargo build --release --workspace
-```
-
-**Caso queira compilar separadamente (por exemplo, compilar só o servidor no Linux e só o cliente no Mac):**
-
-Para compilar apenas o Servidor:
+### No Servidor (Linux):
 ```bash
 cargo build --release -p server
 ```
 
-Para compilar apenas o Cliente:
+### No Cliente (Mac):
 ```bash
-cargo build --release -p client
+cd client
+swift build -c release
+cd ..
 ```
 
 ---
 
 ## 3. Inicie o Servidor (No Linux)
 
-O servidor precisa ser executado como Root (para conseguir capturar a placa de vídeo via `kmsgrab` e simular o teclado/mouse virtual). O codec padrão é o H.264, mas você pode usar o H.265 (HEVC) para maior qualidade usando a mesma largura de banda.
+O servidor precisa ser executado como Root (para conseguir capturar a placa de vídeo via `kmsgrab` e simular o teclado/mouse virtual via `uinput`).
 
-Para rodar com o padrão (H.264):
+Para rodar com o codec padrão (**H.264**):
 ```bash
-cd screen-share
 sudo ./target/release/server
 ```
 
 Para rodar com suporte a **H.265 / HEVC**:
 ```bash
-cd screen-share
 sudo ./target/release/server --codec hevc
 ```
 
@@ -62,29 +54,25 @@ sudo ./target/release/server --codec hevc
 
 ## 4. Conecte o Cliente (No Mac)
 
-Abra o terminal no seu Mac e vá até a pasta do projeto.
-
 ### Método 1: Usando a Interface Gráfica (Recomendado)
-Para abrir o Launcher gráfico (onde você pode salvar o IP e selecionar itens do histórico):
+Para abrir o Launcher gráfico moderno em SwiftUI (onde você pode salvar o IP e selecionar itens do histórico):
 ```bash
-./target/release/client
+./client/.build/release/ScreenShareClient
 ```
-Uma janela gráfica se abrirá. Basta inserir o IP do host Linux e pressionar `Enter` ou clicar em **Conectar**.
+Uma janela gráfica em Dark Glassmorphism se abrirá. Basta inserir o IP do host Linux e pressionar `Enter` ou clicar em **Conectar**.
 
 ### Método 2: Conexão Direta (Via CLI)
 Se preferir pular a interface gráfica e iniciar a conexão diretamente pelo terminal:
 
-Para conectar no modo padrão (H.264):
+Para conectar no modo padrão (**H.264**):
 ```bash
-./target/release/client 192.168.x.x
+./client/.build/release/ScreenShareClient 192.168.x.x
 ```
 
 Para conectar usando o codec **H.265 / HEVC**:
 ```bash
-./target/release/client 192.168.x.x --codec hevc
+./client/.build/release/ScreenShareClient 192.168.x.x --codec hevc
 ```
 *(Substitua `192.168.x.x` pelo IP anotado)*
 
-**Pronto!** O RS-View abrirá a janela de visualização do seu Linux, permitindo controle completo com mouse, teclado e sincronização bidirecional de clipboard.
-
-cargo run --release -p client -- 192.168.68.51 --codec hevc
+**Pronto!** O RS-View abrirá a janela de streaming nativa com decodificação por hardware direta na GPU, latência sub-milissegundo e HUD de FPS/ms em tempo real.

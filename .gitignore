@@ -1,8 +1,17 @@
-# Gerado pelo Cargo
+# Gerado pelo Cargo (Rust)
 /target/
+
+# Gerado pelo Swift Package Manager (macOS/Swift)
+.build/
+**/.build/
+.swiftpm/
+**/.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
 
 # Arquivos temporários e de build do IDE/Sistema
 .DS_Store
+**/.DS_Store
 .idea/
 .vscode/
 *.rs.bk

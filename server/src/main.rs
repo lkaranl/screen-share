@@ -65,15 +65,28 @@ async fn run_video_server(codec: capture::VideoCodec) -> Result<()> {
                     Ok((mut child, mut stdout)) => {
                         info!("🎬 FFmpeg iniciado ({:?}), enviando bytes brutos para o socket...", codec);
                         let mut socket_write = socket;
-                        
-                        match tokio::io::copy(&mut stdout, &mut socket_write).await {
-                            Ok(bytes) => {
-                                info!("⏹️  Conexão de vídeo encerrada. Bytes enviados: {}", bytes);
-                            }
-                            Err(e) => {
-                                warn!("⚠️  Conexão de vídeo interrompida: {}", e);
+                        let mut buf = [0u8; 16384];
+                        let mut total_bytes = 0u64;
+
+                        loop {
+                            match tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
+                                Ok(0) => break, // EOF
+                                Ok(n) => {
+                                    if let Err(e) = socket_write.write_all(&buf[..n]).await {
+                                        warn!("⚠️ Erro ao enviar pacote no socket TCP: {}", e);
+                                        break;
+                                    }
+                                    let _ = socket_write.flush().await;
+                                    total_bytes += n as u64;
+                                }
+                                Err(e) => {
+                                    warn!("⚠️ Erro ao ler stdout do FFmpeg: {}", e);
+                                    break;
+                                }
                             }
                         }
+
+                        info!("⏹️  Conexão de vídeo encerrada. Bytes enviados: {}", total_bytes);
 
                         info!("🛑 Matando FFmpeg...");
                         let _ = child.kill().await;

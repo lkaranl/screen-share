@@ -63,6 +63,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let mut ffmpeg_args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(), "warning".to_string(),
+        "-fflags".to_string(), "+nobuffer+flush_packets".to_string(),
+        "-flags".to_string(), "low_delay".to_string(),
         // ── Hardware VAAPI ────────────────────────────────────────────────────
         "-init_hw_device".to_string(), format!("drm=drm:{}", config.render_device),
         "-init_hw_device".to_string(), "vaapi=va@drm".to_string(),
@@ -83,13 +85,15 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-profile:v".to_string(), "constrained_baseline".to_string(),
                 "-level".to_string(), "41".to_string(),
                 "-bf".to_string(), "0".to_string(),
+                "-async_depth".to_string(), "1".to_string(), // Zero-latency na GPU AMD
                 "-b:v".to_string(), config.bitrate.clone(),
                 "-maxrate".to_string(), config.bitrate.clone(),
-                "-bufsize".to_string(), "2M".to_string(),
+                "-bufsize".to_string(), "1M".to_string(),
                 "-qp".to_string(), "22".to_string(),
                 "-quality".to_string(), "1".to_string(), // 1 = Speed / Low Latency
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*0.5)".to_string(),
+                "-flush_packets".to_string(), "1".to_string(),
                 "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "h264".to_string(),
@@ -100,13 +104,15 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             ffmpeg_args.extend([
                 "-c:v".to_string(), "hevc_vaapi".to_string(),
                 "-bf".to_string(), "0".to_string(),
+                "-async_depth".to_string(), "1".to_string(), // Zero-latency na GPU AMD
                 "-b:v".to_string(), config.bitrate.clone(),
                 "-maxrate".to_string(), config.bitrate.clone(),
-                "-bufsize".to_string(), "2M".to_string(),
+                "-bufsize".to_string(), "1M".to_string(),
                 "-qp".to_string(), "22".to_string(),
                 "-quality".to_string(), "1".to_string(),
                 "-g".to_string(), gop_str,
                 "-force_key_frames".to_string(), "expr:gte(t,n_forced*0.5)".to_string(),
+                "-flush_packets".to_string(), "1".to_string(),
                 "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "hevc".to_string(),
