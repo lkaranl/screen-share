@@ -9,15 +9,7 @@ final class SampleBufferDisplayView: NSView {
         let displayLayer = AVSampleBufferDisplayLayer()
         displayLayer.videoGravity = .resizeAspect
         displayLayer.preventsDisplaySleepDuringVideoPlayback = true
-
-        var timebase: CMTimebase?
-        CMTimebaseCreateWithSourceClock(allocator: kCFAllocatorDefault, sourceClock: CMClockGetHostTimeClock(), timebaseOut: &timebase)
-        if let timebase = timebase {
-            displayLayer.controlTimebase = timebase
-            CMTimebaseSetTime(timebase, time: CMClockGetTime(CMClockGetHostTimeClock()))
-            CMTimebaseSetRate(timebase, rate: 1.0)
-        }
-
+        // Sem controlTimebase restritivo: cada frame com DisplayImmediately é renderizado no instante em que chega
         return displayLayer
     }
 

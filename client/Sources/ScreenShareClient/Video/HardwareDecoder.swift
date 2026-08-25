@@ -32,11 +32,15 @@ final class HardwareDecoder {
     private func handleH264(nalUnit: NALUnit) {
         switch nalUnit.type {
         case 7: // SPS
-            spsData = nalUnit.data
-            createH264FormatDescription()
+            if spsData != nalUnit.data {
+                spsData = nalUnit.data
+                createH264FormatDescription()
+            }
         case 8: // PPS
-            ppsData = nalUnit.data
-            createH264FormatDescription()
+            if ppsData != nalUnit.data {
+                ppsData = nalUnit.data
+                createH264FormatDescription()
+            }
         case 1...5: // Non-IDR Slice, Partition Slices, IDR Slice
             createAndEmitSampleBuffer(from: nalUnit.data)
         default:
@@ -47,14 +51,20 @@ final class HardwareDecoder {
     private func handleHEVC(nalUnit: NALUnit) {
         switch nalUnit.type {
         case 32: // VPS
-            vpsData = nalUnit.data
-            createHEVCFormatDescription()
+            if vpsData != nalUnit.data {
+                vpsData = nalUnit.data
+                createHEVCFormatDescription()
+            }
         case 33: // SPS
-            spsData = nalUnit.data
-            createHEVCFormatDescription()
+            if spsData != nalUnit.data {
+                spsData = nalUnit.data
+                createHEVCFormatDescription()
+            }
         case 34: // PPS
-            ppsData = nalUnit.data
-            createHEVCFormatDescription()
+            if ppsData != nalUnit.data {
+                ppsData = nalUnit.data
+                createHEVCFormatDescription()
+            }
         case 0...31: // Todos os VCL Slices (TRAIL_N, TRAIL_R, TSA, STSA, RADL, RASL, BLA, IDR, CRA_NUT 21)
             createAndEmitSampleBuffer(from: nalUnit.data)
         default:

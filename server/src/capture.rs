@@ -49,9 +49,6 @@ impl Default for CaptureConfig {
 ///
 /// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo.
 pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
-    let gop_str = config.gop_size.to_string();
-    let framerate_str = config.framerate.to_string();
- 
     // Pipeline: mantém frame na GPU via VAAPI, mas sem forçar escala (captura na resolução nativa)
     let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
  
@@ -72,7 +69,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         // ── Input: kmsgrab DRM/KMS ────────────────────────────────────────────
         "-f".to_string(), "kmsgrab".to_string(),
         "-device".to_string(), config.drm_device.clone(),
-        "-framerate".to_string(), framerate_str,
+        "-framerate".to_string(), "60".to_string(),
         "-i".to_string(), config.drm_device.clone(),
         // ── Filtros GPU ───────────────────────────────────────────────────────
         "-vf".to_string(), vf,
@@ -85,15 +82,13 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-profile:v".to_string(), "constrained_baseline".to_string(),
                 "-level".to_string(), "41".to_string(),
                 "-bf".to_string(), "0".to_string(),
-                "-async_depth".to_string(), "1".to_string(), // Zero-latency na GPU AMD
-                "-b:v".to_string(), config.bitrate.clone(),
-                "-maxrate".to_string(), config.bitrate.clone(),
-                "-bufsize".to_string(), "1M".to_string(),
-                "-qp".to_string(), "22".to_string(),
-                "-quality".to_string(), "1".to_string(), // 1 = Speed / Low Latency
-                "-g".to_string(), gop_str,
-                "-force_key_frames".to_string(), "expr:gte(t,n_forced*0.5)".to_string(),
+                "-async_depth".to_string(), "1".to_string(),
+                "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
+                "-qp".to_string(), "24".to_string(),
+                "-quality".to_string(), "1".to_string(),
+                "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
                 "-flush_packets".to_string(), "1".to_string(),
+                "-r".to_string(), "60".to_string(),
                 "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "h264".to_string(),
@@ -104,15 +99,13 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
             ffmpeg_args.extend([
                 "-c:v".to_string(), "hevc_vaapi".to_string(),
                 "-bf".to_string(), "0".to_string(),
-                "-async_depth".to_string(), "1".to_string(), // Zero-latency na GPU AMD
-                "-b:v".to_string(), config.bitrate.clone(),
-                "-maxrate".to_string(), config.bitrate.clone(),
-                "-bufsize".to_string(), "1M".to_string(),
-                "-qp".to_string(), "22".to_string(),
+                "-async_depth".to_string(), "1".to_string(),
+                "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
+                "-qp".to_string(), "24".to_string(),
                 "-quality".to_string(), "1".to_string(),
-                "-g".to_string(), gop_str,
-                "-force_key_frames".to_string(), "expr:gte(t,n_forced*0.5)".to_string(),
+                "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
                 "-flush_packets".to_string(), "1".to_string(),
+                "-r".to_string(), "60".to_string(),
                 "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "hevc".to_string(),
