@@ -10,14 +10,14 @@ final class VideoReceiver {
     private let parser: NALUnitParser
     private let decoder: HardwareDecoder
 
-    var onSampleBuffer: ((CMSampleBuffer) -> Void)?
+    var onPixelBuffer: ((CVPixelBuffer) -> Void)?
 
     init(codec: VideoCodecType) {
         self.parser = NALUnitParser(codec: codec)
         self.decoder = HardwareDecoder(codec: codec)
 
-        self.decoder.onSampleBufferReady = { [weak self] sampleBuffer in
-            self?.onSampleBuffer?(sampleBuffer)
+        self.decoder.onPixelBufferReady = { [weak self] pixelBuffer in
+            self?.onPixelBuffer?(pixelBuffer)
         }
     }
 

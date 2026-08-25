@@ -2,20 +2,8 @@ import SwiftUI
 import AVFoundation
 import AppKit
 
-final class SampleBufferDisplayView: NSView {
+final class PixelBufferDisplayView: NSView {
     override var wantsUpdateLayer: Bool { true }
-
-    override func makeBackingLayer() -> CALayer {
-        let displayLayer = AVSampleBufferDisplayLayer()
-        displayLayer.videoGravity = .resizeAspect
-        displayLayer.preventsDisplaySleepDuringVideoPlayback = true
-        // Sem controlTimebase restritivo: cada frame com DisplayImmediately é renderizado no instante em que chega
-        return displayLayer
-    }
-
-    var displayLayer: AVSampleBufferDisplayLayer {
-        layer as! AVSampleBufferDisplayLayer
-    }
 
     var inputManager: InputManager?
     private var trackingArea: NSTrackingArea?
@@ -23,16 +11,13 @@ final class SampleBufferDisplayView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.contentsGravity = .resizeAspect
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
-    }
-
-    override func layout() {
-        super.layout()
-        displayLayer.frame = bounds
+        layer?.contentsGravity = .resizeAspect
     }
 
     override func updateTrackingAreas() {
@@ -116,8 +101,8 @@ struct StreamVideoViewRepresentable: NSViewRepresentable {
     let inputManager: InputManager
     @Binding var fpsCount: Int
 
-    func makeNSView(context: Context) -> SampleBufferDisplayView {
-        let view = SampleBufferDisplayView()
+    func makeNSView(context: Context) -> PixelBufferDisplayView {
+        let view = PixelBufferDisplayView()
         view.inputManager = inputManager
 
         var frameCounter = 0
@@ -125,21 +110,19 @@ struct StreamVideoViewRepresentable: NSViewRepresentable {
 
         var hasLoggedFirstFrame = false
 
-        videoReceiver.onSampleBuffer = { [weak view] sampleBuffer in
+        videoReceiver.onPixelBuffer = { [weak view] pixelBuffer in
             guard let view = view else { return }
 
             DispatchQueue.main.async {
                 if !hasLoggedFirstFrame {
-                    print("🖥️ StreamView: Primeiro frame enfileirado na tela (Status da Layer: \(view.displayLayer.status.rawValue))")
+                    print("🖥️ StreamView: Renderização direta de GPU (Zero-Copy) ativa!")
                     hasLoggedFirstFrame = true
                 }
 
-                if view.displayLayer.status == .failed {
-                    print("⚠️ AVSampleBufferDisplayLayer falhou com erro: \(String(describing: view.displayLayer.error))")
-                    view.displayLayer.flush()
-                }
-
-                view.displayLayer.enqueue(sampleBuffer)
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                view.layer?.contents = pixelBuffer
+                CATransaction.commit()
             }
 
             frameCounter += 1
@@ -156,7 +139,7 @@ struct StreamVideoViewRepresentable: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: SampleBufferDisplayView, context: Context) {
+    func updateNSView(_ nsView: PixelBufferDisplayView, context: Context) {
         nsView.inputManager = inputManager
     }
 }

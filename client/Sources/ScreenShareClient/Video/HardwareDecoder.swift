@@ -1,11 +1,12 @@
 import Foundation
 import CoreMedia
 import VideoToolbox
-import AVFoundation
+import CoreVideo
 
 final class HardwareDecoder {
     private let codec: VideoCodecType
     private var formatDescription: CMVideoFormatDescription?
+    private var decompressionSession: VTDecompressionSession?
 
     // H.264 Parameter Sets
     private var spsData: Data?
@@ -14,7 +15,9 @@ final class HardwareDecoder {
     // HEVC Parameter Sets
     private var vpsData: Data?
 
-    var onSampleBufferReady: ((CMSampleBuffer) -> Void)?
+    var onPixelBufferReady: ((CVPixelBuffer) -> Void)?
+
+    private var totalFramesDecoded = 0
 
     init(codec: VideoCodecType) {
         self.codec = codec
@@ -42,7 +45,7 @@ final class HardwareDecoder {
                 createH264FormatDescription()
             }
         case 1...5: // Non-IDR Slice, Partition Slices, IDR Slice
-            createAndEmitSampleBuffer(from: nalUnit.data)
+            decodeSlice(from: nalUnit.data)
         default:
             break
         }
@@ -66,7 +69,7 @@ final class HardwareDecoder {
                 createHEVCFormatDescription()
             }
         case 0...31: // Todos os VCL Slices (TRAIL_N, TRAIL_R, TSA, STSA, RADL, RASL, BLA, IDR, CRA_NUT 21)
-            createAndEmitSampleBuffer(from: nalUnit.data)
+            decodeSlice(from: nalUnit.data)
         default:
             break
         }
@@ -95,8 +98,7 @@ final class HardwareDecoder {
                     self.formatDescription = format
                     let dim = CMVideoFormatDescriptionGetDimensions(format)
                     print("✅ Formato H.264 detectado por Hardware: \(dim.width)x\(dim.height)")
-                } else {
-                    print("⚠️ Falha ao criar CMVideoFormatDescription H.264: status \(status)")
+                    self.setupDecompressionSession(format: format)
                 }
             }
         }
@@ -131,25 +133,61 @@ final class HardwareDecoder {
                         self.formatDescription = format
                         let dim = CMVideoFormatDescriptionGetDimensions(format)
                         print("✅ Formato HEVC/H.265 detectado por Hardware: \(dim.width)x\(dim.height)")
-                    } else {
-                        print("⚠️ Falha ao criar CMVideoFormatDescription HEVC: status \(status)")
+                        self.setupDecompressionSession(format: format)
                     }
                 }
             }
         }
     }
 
-    private var totalFramesEmitted = 0
-    private var hasLoggedWaiting = false
-
-    private func createAndEmitSampleBuffer(from nalData: Data) {
-        guard let formatDesc = formatDescription else {
-            if !hasLoggedWaiting {
-                print("⏳ Decoder: Aguardando SPS/PPS (Headers de vídeo) do servidor para inicializar hardware...")
-                hasLoggedWaiting = true
-            }
-            return
+    private func setupDecompressionSession(format: CMVideoFormatDescription) {
+        if let session = decompressionSession {
+            VTDecompressionSessionInvalidate(session)
+            self.decompressionSession = nil
         }
+
+        let destinationImageBufferAttributes: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferMetalCompatibilityKey: true,
+            kCVPixelBufferOpenGLCompatibilityKey: true
+        ]
+
+        var callbackRecord = VTDecompressionOutputCallbackRecord(
+            decompressionOutputCallback: { decompressionOutputRefCon, sourceFrameRefCon, status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration in
+                guard let refCon = decompressionOutputRefCon else { return }
+                let decoder = Unmanaged<HardwareDecoder>.fromOpaque(refCon).takeUnretainedValue()
+
+                if status == noErr, let pixelBuffer = imageBuffer {
+                    decoder.totalFramesDecoded += 1
+                    decoder.onPixelBufferReady?(pixelBuffer)
+                }
+            },
+            decompressionOutputRefCon: Unmanaged.passUnretained(self).toOpaque()
+        )
+
+        var newSession: VTDecompressionSession?
+        let status = VTDecompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            formatDescription: format,
+            decoderSpecification: [
+                kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: true
+            ] as CFDictionary,
+            imageBufferAttributes: destinationImageBufferAttributes as CFDictionary,
+            outputCallback: &callbackRecord,
+            decompressionSessionOut: &newSession
+        )
+
+        if status == noErr, let session = newSession {
+            VTSessionSetProperty(session, key: kVTDecompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+            self.decompressionSession = session
+            print("🚀 VTDecompressionSession de Hardware (Real-Time Zero-Copy) inicializada!")
+        } else {
+            print("⚠️ Falha ao criar VTDecompressionSession: status \(status)")
+        }
+    }
+
+    private func decodeSlice(from nalData: Data) {
+        guard let formatDesc = formatDescription, let session = decompressionSession else { return }
 
         var blockBuffer: CMBlockBuffer?
         let totalLength = nalData.count + 4
@@ -165,10 +203,7 @@ final class HardwareDecoder {
             blockBufferOut: &blockBuffer
         )
 
-        guard status == noErr, let buffer = blockBuffer else {
-            print("⚠️ Erro ao criar CMBlockBuffer: \(status)")
-            return
-        }
+        guard status == noErr, let buffer = blockBuffer else { return }
 
         // Prefixo de 4 bytes com o tamanho do NAL em Big-Endian (Formato AVCC)
         var lengthBigEndian = UInt32(nalData.count).bigEndian
@@ -214,22 +249,20 @@ final class HardwareDecoder {
         )
 
         if status == noErr, let sample = sampleBuffer {
-            // Anexa flag para exibição imediata
-            if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) {
-                let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
-                CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
-            }
+            var flagsOut: VTDecodeInfoFlags = []
+            VTDecompressionSessionDecodeFrame(
+                session,
+                sampleBuffer: sample,
+                flags: [._EnableAsynchronousDecompression],
+                frameRefcon: nil,
+                infoFlagsOut: &flagsOut
+            )
+        }
+    }
 
-            totalFramesEmitted += 1
-            if totalFramesEmitted == 1 {
-                print("🎉 Decoder: Primeiro frame CMSampleBuffer gerado com sucesso!")
-            } else if totalFramesEmitted % 180 == 0 {
-                print("🎬 Decoder: \(totalFramesEmitted) frames de vídeo gerados para renderização")
-            }
-
-            self.onSampleBufferReady?(sample)
-        } else {
-            print("⚠️ Erro ao criar CMSampleBuffer: \(status)")
+    deinit {
+        if let session = decompressionSession {
+            VTDecompressionSessionInvalidate(session)
         }
     }
 }

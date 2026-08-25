@@ -60,6 +60,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
     let mut ffmpeg_args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(), "warning".to_string(),
+        "-threads".to_string(), "1".to_string(),
+        "-filter_threads".to_string(), "1".to_string(),
         "-fflags".to_string(), "+nobuffer+flush_packets".to_string(),
         "-flags".to_string(), "low_delay".to_string(),
         // ── Hardware VAAPI ────────────────────────────────────────────────────
@@ -84,9 +86,10 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-bf".to_string(), "0".to_string(),
                 "-async_depth".to_string(), "1".to_string(),
                 "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
-                "-qp".to_string(), "24".to_string(),
+                "-qp".to_string(), "22".to_string(),
                 "-quality".to_string(), "1".to_string(),
                 "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
+                "-sei".to_string(), "0".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
                 "-r".to_string(), "60".to_string(),
                 "-bsf:v".to_string(), "dump_extra=freq=keyframe".to_string(),
@@ -101,9 +104,10 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-bf".to_string(), "0".to_string(),
                 "-async_depth".to_string(), "1".to_string(),
                 "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
-                "-qp".to_string(), "24".to_string(),
+                "-qp".to_string(), "22".to_string(),
                 "-quality".to_string(), "1".to_string(),
                 "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
+                "-sei".to_string(), "0".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
                 "-r".to_string(), "60".to_string(),
                 "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
