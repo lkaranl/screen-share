@@ -49,8 +49,8 @@ impl Default for CaptureConfig {
 ///
 /// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo.
 pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
-    // Pipeline: mantém frame na GPU via VAAPI, mas sem forçar escala (captura na resolução nativa)
-    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
+    // Pipeline: mantém frame na GPU via VAAPI e força amostragem de 60 FPS constantes
+    let vf = "hwmap=derive_device=vaapi,fps=60,scale_vaapi=format=nv12".to_string();
  
     info!(
         "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={} gop={} codec={:?}",

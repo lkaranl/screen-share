@@ -126,8 +126,9 @@ struct StreamVideoViewRepresentable: NSViewRepresentable {
             }
 
             frameCounter += 1
-            if Date().timeIntervalSince(lastFPSTime) >= 1.0 {
-                let current = frameCounter
+            let elapsed = Date().timeIntervalSince(lastFPSTime)
+            if elapsed >= 0.5 {
+                let current = Int(round(Double(frameCounter) / elapsed))
                 frameCounter = 0
                 lastFPSTime = Date()
                 DispatchQueue.main.async {
