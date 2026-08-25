@@ -25,11 +25,14 @@ pub enum InputCommand {
     ClipboardPaste { text: String },
     /// Requisitar texto copiado
     ClipboardRequest,
+    /// Medição de latência RTT
+    Ping { timestamp: u64 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlResponse {
     ClipboardSync { text: String },
+    Pong { timestamp: u64 },
 }
 
 fn get_user_uid(username: &str) -> String {
@@ -322,7 +325,7 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
                 ]);
             }
 
-            InputCommand::ClipboardPaste { .. } | InputCommand::ClipboardRequest => {}
+            InputCommand::ClipboardPaste { .. } | InputCommand::ClipboardRequest | InputCommand::Ping { .. } => {}
         }
     }
 

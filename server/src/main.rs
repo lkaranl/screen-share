@@ -153,6 +153,13 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                                 match serde_json::from_str::<input::InputCommand>(&line) {
                                     Ok(cmd) => {
                                         match cmd {
+                                            input::InputCommand::Ping { timestamp } => {
+                                                let resp = input::ControlResponse::Pong { timestamp };
+                                                if let Ok(mut resp_json) = serde_json::to_string(&resp) {
+                                                    resp_json.push('\n');
+                                                    let _ = write_half.write_all(resp_json.as_bytes()).await;
+                                                }
+                                            }
                                             input::InputCommand::ClipboardRequest => {
                                                 if let Ok(text) = input::get_remote_clipboard() {
                                                     let resp = input::ControlResponse::ClipboardSync { text };

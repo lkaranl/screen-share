@@ -21,11 +21,13 @@ pub enum InputCommand {
     Key { code: u16, pressed: bool },
     ClipboardPaste { text: String },
     ClipboardRequest,
+    Ping { timestamp: u64 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlResponse {
     ClipboardSync { text: String },
+    Pong { timestamp: u64 },
 }
 
 // Map SDL2 Scancode to Linux Input Event Keycode
@@ -385,6 +387,9 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
         .context("Falha ao clonar socket de controle")?;
 
     let (clipboard_tx, clipboard_rx) = mpsc::channel::<String>();
+    let latency_ms = Arc::new(Mutex::new(0u32));
+    let latency_ms_read = latency_ms.clone();
+
     thread::spawn(move || {
         let mut reader = std::io::BufReader::new(control_socket_read);
         let mut line = String::new();
@@ -394,6 +399,16 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
                 match resp {
                     ControlResponse::ClipboardSync { text } => {
                         let _ = clipboard_tx.send(text);
+                    }
+                    ControlResponse::Pong { timestamp } => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let rtt = now.saturating_sub(timestamp) as u32;
+                        if let Ok(mut lock) = latency_ms_read.lock() {
+                            *lock = rtt;
+                        }
                     }
                 }
             }
@@ -410,28 +425,37 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
     let mut canvas = window
         .into_canvas()
         .accelerated()
-        .present_vsync()
         .build()?;
     let texture_creator = canvas.texture_creator();
     
     // We will initialize the texture when we receive the first frame.
     let mut texture: Option<sdl2::render::Texture> = None;
 
-    let (frame_tx, frame_rx) = mpsc::channel::<FrameData>();
+    // Buffer atômico de 1 único frame (Zero-Buffer / Auto-Drop)
+    let frame_slot = Arc::new(Mutex::new(None));
+    let frame_slot_decode = frame_slot.clone();
 
     // Spawn FFmpeg decode thread
     let server_ip_clone = server_ip.clone();
     let codec_hint_clone = codec_hint.clone();
     thread::spawn(move || {
-        if let Err(e) = decode_loop(&server_ip_clone, codec_hint_clone, frame_tx) {
+        if let Err(e) = decode_loop(&server_ip_clone, codec_hint_clone, frame_slot_decode) {
             eprintln!("Erro no decoder FFmpeg: {}", e);
         }
     });
 
     sdl_context.mouse().show_cursor(true);
-    // sdl_context.mouse().set_relative_mouse_mode(true); // Capture mouse perfectly (uncomment for full capture)
 
     let mut event_pump = sdl_context.event_pump().map_err(|e| anyhow::anyhow!(e))?;
+
+    let mut last_mouse_send = std::time::Instant::now();
+    let mut pending_mouse: Option<(i32, i32)> = None;
+
+    // Métricas de FPS e Ping
+    let mut frame_count: u32 = 0;
+    let mut current_fps: u32 = 0;
+    let mut last_fps_time = std::time::Instant::now();
+    let mut last_ping_time = std::time::Instant::now();
 
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -442,10 +466,24 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
                     if win_w > 0 && win_h > 0 {
                         let norm_x = (x as f64 / win_w as f64 * 32767.0) as i32;
                         let norm_y = (y as f64 / win_h as f64 * 32767.0) as i32;
-                        send_cmd(&mut control_socket, InputCommand::MouseMove { x: norm_x, y: norm_y });
+                        pending_mouse = Some((norm_x, norm_y));
+
+                        // Throttling: envia no máximo a cada ~7ms (~140Hz) para evitar saturar o TCP
+                        if last_mouse_send.elapsed() >= std::time::Duration::from_millis(7) {
+                            if let Some((mx, my)) = pending_mouse.take() {
+                                send_cmd(&mut control_socket, InputCommand::MouseMove { x: mx, y: my });
+                                last_mouse_send = std::time::Instant::now();
+                            }
+                        }
                     }
                 }
                 Event::MouseButtonDown { mouse_btn, .. } => {
+                    // Despacha qualquer posição do mouse pendente imediatamente antes do clique
+                    if let Some((mx, my)) = pending_mouse.take() {
+                        send_cmd(&mut control_socket, InputCommand::MouseMove { x: mx, y: my });
+                        last_mouse_send = std::time::Instant::now();
+                    }
+
                     let btn = match mouse_btn {
                         sdl2::mouse::MouseButton::Left => 0,
                         sdl2::mouse::MouseButton::Middle => 1,
@@ -459,6 +497,11 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
                     }
                 }
                 Event::MouseButtonUp { mouse_btn, .. } => {
+                    if let Some((mx, my)) = pending_mouse.take() {
+                        send_cmd(&mut control_socket, InputCommand::MouseMove { x: mx, y: my });
+                        last_mouse_send = std::time::Instant::now();
+                    }
+
                     let btn = match mouse_btn {
                         sdl2::mouse::MouseButton::Left => 0,
                         sdl2::mouse::MouseButton::Middle => 1,
@@ -517,9 +560,43 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
             }
         }
 
-        // Render any available frames
-        let mut has_new_frame = false;
-        while let Ok(frame) = frame_rx.try_recv() {
+        // Despacha mouse pendente se o intervalo tiver decorrido
+        if pending_mouse.is_some() && last_mouse_send.elapsed() >= std::time::Duration::from_millis(7) {
+            if let Some((mx, my)) = pending_mouse.take() {
+                send_cmd(&mut control_socket, InputCommand::MouseMove { x: mx, y: my });
+                last_mouse_send = std::time::Instant::now();
+            }
+        }
+
+        // Envia ping de latência a cada 500ms
+        if last_ping_time.elapsed() >= std::time::Duration::from_millis(500) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            send_cmd(&mut control_socket, InputCommand::Ping { timestamp: now });
+            last_ping_time = std::time::Instant::now();
+        }
+
+        // Atualiza cálculo de FPS a cada 1 segundo
+        if last_fps_time.elapsed() >= std::time::Duration::from_secs(1) {
+            current_fps = frame_count;
+            frame_count = 0;
+            last_fps_time = std::time::Instant::now();
+        }
+
+        // Renderiza exclusivamente o frame mais recente descartando qualquer acúmulo
+        let frame_opt = {
+            if let Ok(mut lock) = frame_slot.lock() {
+                lock.take()
+            } else {
+                None
+            }
+        };
+
+        if let Some(frame) = frame_opt {
+            frame_count += 1;
+
             if texture.is_none() || texture.as_ref().unwrap().query().width != frame.width || texture.as_ref().unwrap().query().height != frame.height {
                 // Ajusta o tamanho da janela do SDL2 para corresponder ao vídeo nativo do servidor
                 let _ = canvas.window_mut().set_size(frame.width, frame.height);
@@ -538,27 +615,121 @@ fn run_client(server_ip: String, codec_hint: Option<String>) -> Result<()> {
                     &frame.u, frame.u_pitch,
                     &frame.v, frame.v_pitch,
                 ).unwrap();
-                has_new_frame = true;
-            }
-        }
 
-        if has_new_frame {
-            if let Some(tex) = texture.as_ref() {
                 canvas.clear();
                 canvas.copy(tex, None, None).unwrap();
+
+                // ── HUD de FPS e Latência no Canto Superior Direito ───────────
+                let rtt = latency_ms.lock().map(|l| *l).unwrap_or(0);
+                let hud_text = format!("{} FPS | {} ms", current_fps, rtt);
+                let text_scale = 1;
+                let char_width = 6 * text_scale;
+                let char_height = 7 * text_scale;
+                let padding_x = 8;
+                let padding_y = 5;
+                let dot_size = 6;
+                let dot_margin = 6;
+
+                let text_width = hud_text.len() as i32 * char_width;
+                let hud_width = padding_x * 2 + dot_size + dot_margin + text_width;
+                let hud_height = padding_y * 2 + char_height.max(dot_size);
+
+                let (win_w, _) = canvas.window().size();
+                let hud_x = (win_w as i32) - hud_width - 12;
+                let hud_y = 12;
+
+                if hud_x > 0 {
+                    canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
+
+                    // Fundo translúcido escuro
+                    canvas.set_draw_color(sdl2::pixels::Color::RGBA(12, 15, 22, 210));
+                    let bg_rect = sdl2::rect::Rect::new(hud_x, hud_y, hud_width as u32, hud_height as u32);
+                    let _ = canvas.fill_rect(bg_rect);
+
+                    // Borda fina sutil
+                    canvas.set_draw_color(sdl2::pixels::Color::RGBA(70, 85, 110, 180));
+                    let _ = canvas.draw_rect(bg_rect);
+
+                    // Indicador LED de latência (Verde <= 15ms | Amarelo <= 40ms | Vermelho > 40ms)
+                    let dot_color = if rtt <= 15 {
+                        sdl2::pixels::Color::RGB(50, 220, 100)
+                    } else if rtt <= 40 {
+                        sdl2::pixels::Color::RGB(240, 190, 40)
+                    } else {
+                        sdl2::pixels::Color::RGB(240, 60, 60)
+                    };
+
+                    canvas.set_draw_color(dot_color);
+                    let dot_y = hud_y + (hud_height - dot_size) / 2;
+                    let dot_rect = sdl2::rect::Rect::new(hud_x + padding_x, dot_y, dot_size as u32, dot_size as u32);
+                    let _ = canvas.fill_rect(dot_rect);
+
+                    // Texto Bitmap
+                    let text_x = hud_x + padding_x + dot_size + dot_margin;
+                    let text_y = hud_y + padding_y;
+                    draw_hud_text(&mut canvas, &hud_text, text_x, text_y, sdl2::pixels::Color::RGB(230, 235, 245), text_scale);
+                }
+
                 canvas.present();
             }
+        } else {
+            // Micro-espera para evitar alto uso de CPU ociosa sem introduzir latência perceptível
+            thread::sleep(std::time::Duration::from_micros(500));
         }
 
-        // Sincroniza o clipboard local com o recebido do servidor remota
+        // Sincroniza o clipboard local com o recebido do servidor remoto
         while let Ok(text) = clipboard_rx.try_recv() {
             let _ = video_subsystem.clipboard().set_clipboard_text(&text);
         }
-
-        thread::sleep(std::time::Duration::from_millis(2));
     }
 
     Ok(())
+}
+
+fn draw_hud_char(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, c: char, x: i32, y: i32, color: sdl2::pixels::Color, scale: i32) {
+    let bitmap: [u8; 7] = match c {
+        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
+        '3' => [0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110],
+        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
+        'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
+        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
+        'S' => [0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110],
+        'm' => [0b00000, 0b00000, 0b11010, 0b10101, 0b10101, 0b10101, 0b10101],
+        's' => [0b00000, 0b00000, 0b01111, 0b10000, 0b01110, 0b00001, 0b11110],
+        '|' => [0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+        ' ' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
+        _ =>   [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
+    };
+
+    canvas.set_draw_color(color);
+    for (row, bits) in bitmap.iter().enumerate() {
+        for col in 0..5 {
+            if (bits & (1 << (4 - col))) != 0 {
+                let rect = sdl2::rect::Rect::new(
+                    x + (col as i32) * scale,
+                    y + (row as i32) * scale,
+                    scale as u32,
+                    scale as u32,
+                );
+                let _ = canvas.fill_rect(rect);
+            }
+        }
+    }
+}
+
+fn draw_hud_text(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, text: &str, start_x: i32, start_y: i32, color: sdl2::pixels::Color, scale: i32) {
+    let mut cur_x = start_x;
+    for c in text.chars() {
+        draw_hud_char(canvas, c, cur_x, start_y, color, scale);
+        cur_x += (5 + 1) * scale;
+    }
 }
 
 fn send_cmd(socket: &mut TcpStream, cmd: InputCommand) {
@@ -568,7 +739,7 @@ fn send_cmd(socket: &mut TcpStream, cmd: InputCommand) {
     }
 }
 
-fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Sender<FrameData>) -> Result<()> {
+fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_slot: Arc<Mutex<Option<FrameData>>>) -> Result<()> {
     ffmpeg::init()?;
     ffmpeg::log::set_level(ffmpeg::log::Level::Warning);
 
@@ -582,12 +753,10 @@ fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Send
     let mut dict = ffmpeg::Dictionary::new();
     dict.set("flags", "low_delay");
     dict.set("fflags", "nobuffer");
-    // HEVC tem frames IDR maiores. probesize 4096 trunca o frame na análise
-    // e causa "Could not find ref". Aumentar para 128KB resolve isso sem atraso.
-    dict.set("probesize", "131072");
+    dict.set("probesize", "65536");
     dict.set("analyzeduration", "0");
 
-    let input_url = format!("tcp://{}:5000?nodelay=1", server_ip);
+    let input_url = format!("tcp://{}:5000?nodelay=1&buffer_size=65536", server_ip);
     let mut ictx = ffmpeg::format::input_with_dictionary(&input_url, dict)?;
 
     let input_stream = ictx
@@ -631,17 +800,17 @@ fn decode_loop(server_ip: &str, codec_hint: Option<String>, frame_tx: mpsc::Send
             let u_data = rgb_frame.data(1).to_vec();
             let v_data = rgb_frame.data(2).to_vec();
 
-            if frame_tx.send(FrameData {
-                width,
-                height,
-                y: y_data,
-                u: u_data,
-                v: v_data,
-                y_pitch,
-                u_pitch,
-                v_pitch,
-            }).is_err() {
-                return Ok(()); // Main thread closed
+            if let Ok(mut lock) = frame_slot.lock() {
+                *lock = Some(FrameData {
+                    width,
+                    height,
+                    y: y_data,
+                    u: u_data,
+                    v: v_data,
+                    y_pitch,
+                    u_pitch,
+                    v_pitch,
+                });
             }
         }
         Ok(())
