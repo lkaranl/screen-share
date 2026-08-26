@@ -72,29 +72,50 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
     info!("🎥 Servidor de Vídeo (RTP/UDP + FEC + Handshake) pronto na porta 5000 | Codec: {:?}", codec);
 
     loop {
-        match tcp_listener.accept().await {
-            Ok((socket, client_addr)) => {
-                info!("🔗 Cliente conectado para sessão de vídeo UDP: {}", client_addr);
-                let _ = socket.set_nodelay(true);
+        let client_udp_target: SocketAddr = tokio::select! {
+            res = tcp_listener.accept() => {
+                match res {
+                    Ok((socket, client_addr)) => {
+                        info!("🔗 Handshake TCP de vídeo recebido de {}", client_addr);
+                        let _ = socket.set_nodelay(true);
+                        SocketAddr::new(client_addr.ip(), 5000)
+                    }
+                    Err(e) => {
+                        error!("❌ Erro no handshake TCP: {}", e);
+                        continue;
+                    }
+                }
+            }
+            res = udp_sender.wait_for_client() => {
+                match res {
+                    Ok(addr) => {
+                        info!("🎯 Pacote de descoberta UDP recebido de {}", addr);
+                        addr
+                    }
+                    Err(e) => {
+                        error!("❌ Erro ao aguardar cliente UDP: {}", e);
+                        continue;
+                    }
+                }
+            }
+        };
 
-                // O cliente receberá o fluxo UDP na mesma porta 5000 em seu IP
-                let client_udp_target = SocketAddr::new(client_addr.ip(), 5000);
-                info!("🚀 Iniciando transmissão UDP de vídeo para {}", client_udp_target);
+        info!("🚀 Iniciando transmissão UDP de vídeo para {}", client_udp_target);
 
-                let mut config = CaptureConfig::default();
-                config.codec = codec;
+        let mut config = CaptureConfig::default();
+        config.codec = codec;
 
-                match capture::spawn_ffmpeg(&config) {
-                    Ok((mut child, mut stdout)) => {
-                        info!("🎬 FFmpeg iniciado ({:?}), transmitindo via RTP/UDP + FEC...", codec);
+        match capture::spawn_ffmpeg(&config) {
+            Ok((mut child, mut stdout)) => {
+                info!("🎬 FFmpeg iniciado ({:?}), transmitindo via RTP/UDP + FEC...", codec);
 
-                        let udp_sender_clone = udp_sender.clone();
-                        let fec_encoder_clone = fec_encoder.clone();
+                let udp_sender_clone = udp_sender.clone();
+                let fec_encoder_clone = fec_encoder.clone();
 
-                        tokio::spawn(async move {
-                            let mut extractor = NalExtractor::new();
-                            let mut buf = [0u8; 16384];
-                            let mut frame_counter: u32 = 0;
+                tokio::spawn(async move {
+                    let mut extractor = NalExtractor::new();
+                    let mut buf = [0u8; 16384];
+                    let mut frame_counter: u32 = 0;
 
                             loop {
                                 match tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
@@ -124,11 +145,6 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
                         error!("❌ Falha ao iniciar FFmpeg: {}", e);
                     }
                 }
-            }
-            Err(e) => {
-                error!("❌ Erro ao aceitar conexão TCP de handshake de vídeo: {}", e);
-            }
-        }
     }
 }
 
