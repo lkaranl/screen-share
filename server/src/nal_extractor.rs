@@ -1,13 +1,11 @@
 pub struct NalExtractor {
     buffer: Vec<u8>,
-    codec_id: u8, // 0 = H.264, 1 = HEVC
 }
 
 impl NalExtractor {
-    pub fn new(codec_id: u8) -> Self {
+    pub fn new() -> Self {
         Self {
             buffer: Vec::with_capacity(65536),
-            codec_id,
         }
     }
 

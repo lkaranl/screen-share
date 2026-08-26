@@ -73,7 +73,7 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
 
     loop {
         match tcp_listener.accept().await {
-            Ok((mut socket, client_addr)) => {
+            Ok((socket, client_addr)) => {
                 info!("🔗 Cliente conectado para sessão de vídeo UDP: {}", client_addr);
                 let _ = socket.set_nodelay(true);
 
@@ -92,7 +92,7 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
                         let fec_encoder_clone = fec_encoder.clone();
 
                         tokio::spawn(async move {
-                            let mut extractor = NalExtractor::new(codec_id);
+                            let mut extractor = NalExtractor::new();
                             let mut buf = [0u8; 16384];
                             let mut frame_counter: u32 = 0;
 

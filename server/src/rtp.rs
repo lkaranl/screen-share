@@ -3,7 +3,8 @@ use byteorder::{BigEndian, ByteOrder};
 pub const RTP_MAGIC: u16 = 0x5253; // "RS" (Remote Screen)
 pub const RTP_HEADER_SIZE: usize = 16;
 pub const RTP_PAYLOAD_MAX_SIZE: usize = 1380;
-pub const RTP_PACKET_MAX_SIZE: usize = RTP_HEADER_SIZE + RTP_PAYLOAD_MAX_SIZE; // 1396 bytes (cabe perfeitamente em MTU 1500)
+#[allow(dead_code)]
+pub const RTP_PACKET_MAX_SIZE: usize = RTP_HEADER_SIZE + RTP_PAYLOAD_MAX_SIZE;
 
 pub const FLAG_SOF: u8 = 0x01; // Start of Frame
 pub const FLAG_EOF: u8 = 0x02; // End of Frame
@@ -33,6 +34,7 @@ impl VideoRtpHeader {
         buf[15] = self.codec;
     }
 
+    #[allow(dead_code)]
     pub fn deserialize(buf: &[u8]) -> Option<Self> {
         if buf.len() < RTP_HEADER_SIZE {
             return None;
