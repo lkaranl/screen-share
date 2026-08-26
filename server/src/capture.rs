@@ -85,10 +85,12 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-level".to_string(), "41".to_string(),
                 "-bf".to_string(), "0".to_string(),
                 "-async_depth".to_string(), "1".to_string(),
-                "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
+                "-rc_mode".to_string(), "CQP".to_string(),
                 "-qp".to_string(), "22".to_string(),
-                "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
+                "-g".to_string(), "120".to_string(),
+                "-aud".to_string(), "1".to_string(),
                 "-sei".to_string(), "0".to_string(),
+                "-bsf:v".to_string(), "h264_mp4toannexb".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
                 "-r".to_string(), "60".to_string(),
                 "-an".to_string(),
@@ -101,10 +103,12 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-c:v".to_string(), "hevc_vaapi".to_string(),
                 "-bf".to_string(), "0".to_string(),
                 "-async_depth".to_string(), "1".to_string(),
-                "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
+                "-rc_mode".to_string(), "CQP".to_string(),
                 "-qp".to_string(), "22".to_string(),
-                "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
+                "-g".to_string(), "120".to_string(),
+                "-aud".to_string(), "1".to_string(),
                 "-sei".to_string(), "0".to_string(),
+                "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
                 "-r".to_string(), "60".to_string(),
                 "-an".to_string(),

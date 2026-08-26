@@ -27,9 +27,7 @@ final class UdpVideoReceiver {
         self.fecDecoder.onFrameReconstructed = { [weak self] (frameData: Data, _: UInt8) in
             guard let self = self else { return }
             let nalUnits = self.parser.parse(data: frameData)
-            for nal in nalUnits {
-                self.decoder.decode(nalUnit: nal)
-            }
+            self.decoder.decodeFrame(nalUnits: nalUnits)
         }
     }
 

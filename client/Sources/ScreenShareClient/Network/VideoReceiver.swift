@@ -72,9 +72,7 @@ final class VideoReceiver {
                 }
 
                 let nalUnits = self.parser.parse(data: data)
-                for nal in nalUnits {
-                    self.decoder.decode(nalUnit: nal)
-                }
+                self.decoder.decodeFrame(nalUnits: nalUnits)
             }
 
             if let err = error {

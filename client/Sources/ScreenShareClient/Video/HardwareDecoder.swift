@@ -23,55 +23,57 @@ final class HardwareDecoder {
         self.codec = codec
     }
 
-    func decode(nalUnit: NALUnit) {
-        switch codec {
-        case .h264:
-            handleH264(nalUnit: nalUnit)
-        case .hevc:
-            handleHEVC(nalUnit: nalUnit)
-        }
-    }
+    func decodeFrame(nalUnits: [NALUnit]) {
+        guard !nalUnits.isEmpty else { return }
 
-    private func handleH264(nalUnit: NALUnit) {
-        switch nalUnit.type {
-        case 7: // SPS
-            if spsData != nalUnit.data {
-                spsData = nalUnit.data
-                createH264FormatDescription()
-            }
-        case 8: // PPS
-            if ppsData != nalUnit.data {
-                ppsData = nalUnit.data
-                createH264FormatDescription()
-            }
-        case 1...5: // Non-IDR Slice, Partition Slices, IDR Slice
-            decodeSlice(from: nalUnit.data)
-        default:
-            break
-        }
-    }
+        var slices: [Data] = []
 
-    private func handleHEVC(nalUnit: NALUnit) {
-        switch nalUnit.type {
-        case 32: // VPS
-            if vpsData != nalUnit.data {
-                vpsData = nalUnit.data
-                createHEVCFormatDescription()
+        for nal in nalUnits {
+            switch codec {
+            case .h264:
+                switch nal.type {
+                case 7: // SPS
+                    if spsData != nal.data {
+                        spsData = nal.data
+                        createH264FormatDescription()
+                    }
+                case 8: // PPS
+                    if ppsData != nal.data {
+                        ppsData = nal.data
+                        createH264FormatDescription()
+                    }
+                case 1...5: // VCL Slices
+                    slices.append(nal.data)
+                default:
+                    break
+                }
+            case .hevc:
+                switch nal.type {
+                case 32: // VPS
+                    if vpsData != nal.data {
+                        vpsData = nal.data
+                        createHEVCFormatDescription()
+                    }
+                case 33: // SPS
+                    if spsData != nal.data {
+                        spsData = nal.data
+                        createHEVCFormatDescription()
+                    }
+                case 34: // PPS
+                    if ppsData != nal.data {
+                        ppsData = nal.data
+                        createHEVCFormatDescription()
+                    }
+                case 0...31: // VCL Slices (IDR, CRA, TRAIL, etc.)
+                    slices.append(nal.data)
+                default:
+                    break
+                }
             }
-        case 33: // SPS
-            if spsData != nalUnit.data {
-                spsData = nalUnit.data
-                createHEVCFormatDescription()
-            }
-        case 34: // PPS
-            if ppsData != nalUnit.data {
-                ppsData = nalUnit.data
-                createHEVCFormatDescription()
-            }
-        case 0...31: // Todos os VCL Slices
-            decodeSlice(from: nalUnit.data)
-        default:
-            print("ℹ️ NAL Unit HEVC tipo desconhecido: \(nalUnit.type) (\(nalUnit.data.count) bytes)")
+        }
+
+        if !slices.isEmpty {
+            decodeSlices(slices)
         }
     }
 
@@ -96,7 +98,7 @@ final class HardwareDecoder {
 
                 if status == noErr, let format = newFormatDesc {
                     if let current = self.formatDescription, CMFormatDescriptionEqual(current, otherFormatDescription: format) {
-                        return // Formato exatamente idêntico, sessão atual continua válida
+                        return
                     }
                     let dim = CMVideoFormatDescriptionGetDimensions(format)
                     print("✅ Formato H.264 detectado por Hardware: \(dim.width)x\(dim.height)")
@@ -133,7 +135,7 @@ final class HardwareDecoder {
 
                     if status == noErr, let format = newFormatDesc {
                         if let current = self.formatDescription, CMFormatDescriptionEqual(current, otherFormatDescription: format) {
-                            return // Formato exatamente idêntico, sessão atual continua válida
+                            return
                         }
                         let dim = CMVideoFormatDescriptionGetDimensions(format)
                         print("✅ Formato HEVC/H.265 detectado por Hardware: \(dim.width)x\(dim.height)")
@@ -159,7 +161,7 @@ final class HardwareDecoder {
         ]
 
         var callbackRecord = VTDecompressionOutputCallbackRecord(
-            decompressionOutputCallback: { decompressionOutputRefCon, sourceFrameRefCon, status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration in
+            decompressionOutputCallback: { decompressionOutputRefCon, _, status, infoFlags, imageBuffer, _, _ in
                 guard let refCon = decompressionOutputRefCon else { return }
                 let decoder = Unmanaged<HardwareDecoder>.fromOpaque(refCon).takeUnretainedValue()
 
@@ -199,14 +201,16 @@ final class HardwareDecoder {
         }
     }
 
-    private func decodeSlice(from nalData: Data) {
+    /// Decodifica todos os slices de um quadro juntos no mesmo CMSampleBuffer (padrão Moonlight)
+    private func decodeSlices(_ slices: [Data]) {
         guard let formatDesc = formatDescription, let session = decompressionSession else {
-            print("⚠️ decodeSlice ignorado: formatDesc=\(formatDescription != nil) session=\(decompressionSession != nil)")
             return
         }
 
+        // Calcula tamanho total com prefixo de 4 bytes de tamanho para cada slice (formato AVCC/HVCC)
+        let totalLength = slices.reduce(0) { $0 + $1.count + 4 }
+
         var blockBuffer: CMBlockBuffer?
-        let totalLength = nalData.count + 4
         var status = CMBlockBufferCreateWithMemoryBlock(
             allocator: kCFAllocatorDefault,
             memoryBlock: nil,
@@ -220,32 +224,32 @@ final class HardwareDecoder {
         )
 
         guard status == noErr, let buffer = blockBuffer else {
-            print("⚠️ Erro CMBlockBufferCreate: \(status)")
             return
         }
 
-        // Prefixo de 4 bytes com o tamanho do NAL em Big-Endian (Formato AVCC)
-        var lengthBigEndian = UInt32(nalData.count).bigEndian
-        status = CMBlockBufferReplaceDataBytes(
-            with: &lengthBigEndian,
-            blockBuffer: buffer,
-            offsetIntoDestination: 0,
-            dataLength: 4
-        )
-        guard status == noErr else {
-            print("⚠️ Erro CMBlockBufferReplaceDataBytes header: \(status)")
-            return
-        }
+        var offset = 0
+        for slice in slices {
+            var lengthBigEndian = UInt32(slice.count).bigEndian
+            status = CMBlockBufferReplaceDataBytes(
+                with: &lengthBigEndian,
+                blockBuffer: buffer,
+                offsetIntoDestination: offset,
+                dataLength: 4
+            )
+            guard status == noErr else { return }
+            offset += 4
 
-        nalData.withUnsafeBytes { rawPtr in
-            if let baseAddress = rawPtr.baseAddress {
-                _ = CMBlockBufferReplaceDataBytes(
-                    with: baseAddress,
-                    blockBuffer: buffer,
-                    offsetIntoDestination: 4,
-                    dataLength: nalData.count
-                )
+            slice.withUnsafeBytes { rawPtr in
+                if let baseAddress = rawPtr.baseAddress {
+                    _ = CMBlockBufferReplaceDataBytes(
+                        with: baseAddress,
+                        blockBuffer: buffer,
+                        offsetIntoDestination: offset,
+                        dataLength: slice.count
+                    )
+                }
             }
+            offset += slice.count
         }
 
         var sampleBuffer: CMSampleBuffer?
@@ -282,8 +286,6 @@ final class HardwareDecoder {
             if decodeStatus != noErr {
                 print("⚠️ VTDecompressionSessionDecodeFrame retornou erro: \(decodeStatus)")
             }
-        } else {
-            print("⚠️ CMSampleBufferCreate retornou erro: \(status)")
         }
     }
 
