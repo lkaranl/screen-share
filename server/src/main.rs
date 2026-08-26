@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, error, warn};
@@ -5,8 +7,15 @@ use anyhow::Result;
 
 mod capture;
 mod input;
+mod rtp;
+mod fec;
+mod udp_sender;
+mod nal_extractor;
 
 use capture::CaptureConfig;
+use fec::FecEncoder;
+use nal_extractor::NalExtractor;
+use udp_sender::UdpSender;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -16,7 +25,7 @@ async fn main() -> Result<()> {
 
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
-    let mut codec = capture::VideoCodec::H264;
+    let mut codec = capture::VideoCodec::HEVC; // Padrão HEVC de alta performance
     if let Some(pos) = args.iter().position(|x| x == "--codec") {
         if pos + 1 < args.len() {
             match args[pos + 1].to_lowercase().as_str() {
@@ -24,7 +33,7 @@ async fn main() -> Result<()> {
                 "av1" => codec = capture::VideoCodec::AV1,
                 "h264" => codec = capture::VideoCodec::H264,
                 other => {
-                    warn!("⚠️ Codec desconhecido '{}', usando padrão H.264", other);
+                    warn!("⚠️ Codec desconhecido '{}', usando padrão HEVC", other);
                 }
             }
         }
@@ -34,7 +43,7 @@ async fn main() -> Result<()> {
     let input_tx = input::start_input_handler()?;
     info!("✅ Dispositivos virtuais de input criados (mouse + teclado)");
 
-    // Spawn Input/Control TCP Server
+    // Spawn Input/Control TCP Server (Porta 5001)
     let input_tx_clone = input_tx.clone();
     tokio::spawn(async move {
         if let Err(e) = run_control_server(input_tx_clone).await {
@@ -42,55 +51,74 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Run Video TCP Server on main thread
-    run_video_server(codec).await?;
+    // Run Video UDP + FEC Server (Porta 5000)
+    run_video_udp_server(codec).await?;
 
     Ok(())
 }
 
-async fn run_video_server(codec: capture::VideoCodec) -> Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:5000").await?;
-    info!("🎥 Servidor de Vídeo (TCP) rodando na porta 5000 | Codec: {:?}", codec);
+async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
+    let udp_sender = Arc::new(UdpSender::bind(5000).await?);
+    let codec_id = match codec {
+        capture::VideoCodec::H264 => 0u8,
+        capture::VideoCodec::HEVC => 1u8,
+        capture::VideoCodec::AV1 => 2u8,
+    };
+
+    let fec_encoder = Arc::new(FecEncoder::new(20)); // 20% de tolerância a perdas (Reed-Solomon)
+
+    // Socket TCP 5000 para sincronismo de handshake e descoberta do cliente
+    let tcp_listener = TcpListener::bind("0.0.0.0:5000").await?;
+    info!("🎥 Servidor de Vídeo (RTP/UDP + FEC + Handshake) pronto na porta 5000 | Codec: {:?}", codec);
 
     loop {
-        match listener.accept().await {
-            Ok((socket, addr)) => {
-                info!("🔗 Cliente conectado no canal de Vídeo: {}", addr);
-                // OTIMIZAÇÃO: Ativar TCP_NODELAY para enviar frames de vídeo instantaneamente pela rede local
+        match tcp_listener.accept().await {
+            Ok((mut socket, client_addr)) => {
+                info!("🔗 Cliente conectado para sessão de vídeo UDP: {}", client_addr);
                 let _ = socket.set_nodelay(true);
-                
+
+                // O cliente receberá o fluxo UDP na mesma porta 5000 em seu IP
+                let client_udp_target = SocketAddr::new(client_addr.ip(), 5000);
+                info!("🚀 Iniciando transmissão UDP de vídeo para {}", client_udp_target);
+
                 let mut config = CaptureConfig::default();
                 config.codec = codec;
+
                 match capture::spawn_ffmpeg(&config) {
                     Ok((mut child, mut stdout)) => {
-                        info!("🎬 FFmpeg iniciado ({:?}), enviando bytes brutos para o socket...", codec);
-                        let mut socket_write = socket;
-                        let mut buf = [0u8; 16384];
-                        let mut total_bytes = 0u64;
+                        info!("🎬 FFmpeg iniciado ({:?}), transmitindo via RTP/UDP + FEC...", codec);
 
-                        loop {
-                            match tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
-                                Ok(0) => break, // EOF
-                                Ok(n) => {
-                                    if let Err(e) = socket_write.write_all(&buf[..n]).await {
-                                        warn!("⚠️ Erro ao enviar pacote no socket TCP: {}", e);
+                        let udp_sender_clone = udp_sender.clone();
+                        let fec_encoder_clone = fec_encoder.clone();
+
+                        tokio::spawn(async move {
+                            let mut extractor = NalExtractor::new(codec_id);
+                            let mut buf = [0u8; 16384];
+                            let mut frame_counter: u32 = 0;
+
+                            loop {
+                                match tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
+                                    Ok(0) => break, // EOF
+                                    Ok(n) => {
+                                        let frames = extractor.push_bytes(&buf[..n]);
+                                        for frame_nal in frames {
+                                            frame_counter = frame_counter.wrapping_add(1);
+                                            if let Ok(packets) = fec_encoder_clone.encode_frame(frame_counter, codec_id, &frame_nal) {
+                                                let _ = udp_sender_clone.send_frame_packets(&packets, client_udp_target).await;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("⚠️ Erro na leitura do stream de vídeo: {}", e);
                                         break;
                                     }
-                                    let _ = socket_write.flush().await;
-                                    total_bytes += n as u64;
-                                }
-                                Err(e) => {
-                                    warn!("⚠️ Erro ao ler stdout do FFmpeg: {}", e);
-                                    break;
                                 }
                             }
-                        }
 
-                        info!("⏹️  Conexão de vídeo encerrada. Bytes enviados: {}", total_bytes);
-
-                        info!("🛑 Matando FFmpeg...");
-                        let _ = child.kill().await;
-                        let _ = child.wait().await;
+                            info!("🛑 Encerrando sessão FFmpeg...");
+                            let _ = child.kill().await;
+                            let _ = child.wait().await;
+                        });
                     }
                     Err(e) => {
                         error!("❌ Falha ao iniciar FFmpeg: {}", e);
@@ -98,7 +126,7 @@ async fn run_video_server(codec: capture::VideoCodec) -> Result<()> {
                 }
             }
             Err(e) => {
-                error!("❌ Erro ao aceitar conexão TCP de vídeo: {}", e);
+                error!("❌ Erro ao aceitar conexão TCP de handshake de vídeo: {}", e);
             }
         }
     }

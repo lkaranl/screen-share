@@ -25,6 +25,10 @@ bytes = "1"
 # Error handling ergonômico
 anyhow = "1"
 
+# Forward Error Correction (Reed-Solomon SIMD)
+reed-solomon-erasure = "6.0"
+byteorder = "1.5"
+
 # Logging estruturado
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

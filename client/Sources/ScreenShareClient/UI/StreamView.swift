@@ -97,7 +97,7 @@ final class PixelBufferDisplayView: NSView {
 }
 
 struct StreamVideoViewRepresentable: NSViewRepresentable {
-    let videoReceiver: VideoReceiver
+    let videoReceiver: UdpVideoReceiver
     let inputManager: InputManager
     @Binding var fpsCount: Int
 
@@ -115,7 +115,7 @@ struct StreamVideoViewRepresentable: NSViewRepresentable {
 
             DispatchQueue.main.async {
                 if !hasLoggedFirstFrame {
-                    print("🖥️ StreamView: Renderização direta de GPU (Zero-Copy) ativa!")
+                    print("🖥️ StreamView: Renderização direta de GPU (Zero-Copy RTP/UDP) ativa!")
                     hasLoggedFirstFrame = true
                 }
 
@@ -149,7 +149,7 @@ final class StreamSession: ObservableObject {
     let host: String
     let codec: VideoCodecType
 
-    let videoReceiver: VideoReceiver
+    let videoReceiver: UdpVideoReceiver
     let controlClient: ControlClient
     let inputManager: InputManager
 
@@ -160,7 +160,7 @@ final class StreamSession: ObservableObject {
         self.host = host
         self.codec = codec
 
-        let receiver = VideoReceiver(codec: codec)
+        let receiver = UdpVideoReceiver(codec: codec)
         let control = ControlClient()
         let input = InputManager(controlClient: control)
 
@@ -168,7 +168,7 @@ final class StreamSession: ObservableObject {
         self.controlClient = control
         self.inputManager = input
 
-        print("🚀 StreamSession criada para \(host) com codec \(codec)")
+        print("🚀 StreamSession criada para \(host) com codec \(codec) via RTP/UDP + FEC")
     }
 
     func start() {

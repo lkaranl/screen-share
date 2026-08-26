@@ -18,3 +18,7 @@
 
 # Logs
 *.log
+
+# Repositório de referência externa
+Sunshine/
+/Sunshine/
