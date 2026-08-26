@@ -39,6 +39,7 @@ final class UdpVideoReceiver {
         do {
             let udpParams = NWParameters.udp
             udpParams.allowLocalEndpointReuse = true
+            udpParams.serviceClass = .interactiveVideo // QoS prioritário no Wi-Fi da Apple (WMM Video)
 
             let listener = try NWListener(using: udpParams, on: NWEndpoint.Port(integerLiteral: port))
             self.udpListener = listener

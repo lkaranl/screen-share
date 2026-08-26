@@ -28,6 +28,7 @@ anyhow = "1"
 # Forward Error Correction (Reed-Solomon SIMD)
 reed-solomon-erasure = "6.0"
 byteorder = "1.5"
+socket2 = "0.5"
 
 # Logging estruturado
 tracing = "0.1"

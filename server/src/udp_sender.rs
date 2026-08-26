@@ -10,14 +10,37 @@ pub struct UdpSender {
 
 impl UdpSender {
     pub async fn bind(port: u16) -> Result<Self> {
-        let addr = format!("0.0.0.0:{}", port);
-        let socket = UdpSocket::bind(&addr)
-            .await
-            .context(format!("Falha ao fazer bind UDP na porta {}", port))?;
+        let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
 
-        info!("📡 Servidor de Vídeo (UDP + FEC) escutando em {}", addr);
+        // Cria o socket com socket2 para aplicar configurações de nível de kernel
+        let socket2_sock = socket2::Socket::new(
+            if addr.is_ipv4() {
+                socket2::Domain::IPV4
+            } else {
+                socket2::Domain::IPV6
+            },
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )?;
+
+        // Buffers ampliados de 4MB para evitar perdas de pacotes do kernel
+        let _ = socket2_sock.set_send_buffer_size(4 * 1024 * 1024);
+        let _ = socket2_sock.set_recv_buffer_size(4 * 1024 * 1024);
+
+        // QoS DSCP 40 (CS5 Video) estilo Sunshine para prioridade WMM 802.11e no roteador Wi-Fi
+        let _ = socket2_sock.set_tos(40 << 2);
+        let _ = socket2_sock.set_reuse_address(true);
+        let _ = socket2_sock.set_nonblocking(true);
+
+        socket2_sock.bind(&addr.into())?;
+
+        let std_sock: std::net::UdpSocket = socket2_sock.into();
+        let tokio_sock = UdpSocket::from_std(std_sock)
+            .context(format!("Falha ao inicializar UdpSocket tokio na porta {}", port))?;
+
+        info!("📡 Servidor de Vídeo (UDP + FEC + QoS DSCP) escutando em {}", addr);
         Ok(Self {
-            socket: Arc::new(socket),
+            socket: Arc::new(tokio_sock),
         })
     }
 

@@ -88,6 +88,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
                 "-qp".to_string(), "22".to_string(),
                 "-quality".to_string(), "1".to_string(),
+                "-slices".to_string(), "2".to_string(), // Multi-slice encoding paralelo na GPU AMD
                 "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
                 "-sei".to_string(), "0".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
@@ -106,6 +107,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-rc_mode".to_string(), "CQP".to_string(), // Modo CQP Sunshine (Zero lookahead)
                 "-qp".to_string(), "22".to_string(),
                 "-quality".to_string(), "1".to_string(),
+                "-slices".to_string(), "2".to_string(), // Multi-slice encoding paralelo na GPU AMD
                 "-g".to_string(), "120".to_string(), // GOP 120 (2 segundos a 60 FPS)
                 "-sei".to_string(), "0".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
