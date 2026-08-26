@@ -67,16 +67,22 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
 
     let fec_encoder = Arc::new(FecEncoder::new(20)); // 20% de tolerância a perdas (Reed-Solomon)
 
-    // Socket TCP 5000 para sincronismo de handshake e descoberta do cliente
+    // Socket TCP para descoberta do cliente (handshake de sessão inicial)
     let tcp_listener = TcpListener::bind("0.0.0.0:5000").await?;
-    info!("🎥 Servidor de Vídeo (RTP/UDP + FEC + Handshake) pronto na porta 5000 | Codec: {:?}", codec);
+    // Socket UDP separado para receber o pacote HELO do cliente
+    let helo_socket = Arc::new(tokio::net::UdpSocket::bind("0.0.0.0:5002").await?);
+    info!("🎥 Servidor de Vídeo (RTP/UDP + FEC) pronto | Codec: {:?} | Aguardando cliente na porta 5000 (TCP) ou 5002 (HELO)", codec);
+
+    // Canal de cancelamento da sessão atual
+    let mut session_cancel: Option<tokio::sync::oneshot::Sender<()>> = None;
 
     loop {
+        // Aguarda novo cliente (TCP handshake ou UDP HELO na porta 5002)
         let client_udp_target: SocketAddr = tokio::select! {
             res = tcp_listener.accept() => {
                 match res {
                     Ok((socket, client_addr)) => {
-                        info!("🔗 Handshake TCP de vídeo recebido de {}", client_addr);
+                        info!("🔗 Handshake TCP recebido de {}", client_addr);
                         let _ = socket.set_nodelay(true);
                         SocketAddr::new(client_addr.ip(), 5000)
                     }
@@ -86,19 +92,28 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
                     }
                 }
             }
-            res = udp_sender.wait_for_client() => {
+            res = async {
+                let mut buf = [0u8; 128];
+                helo_socket.recv_from(&mut buf).await
+            } => {
                 match res {
-                    Ok(addr) => {
-                        info!("🎯 Pacote de descoberta UDP recebido de {}", addr);
+                    Ok((_n, addr)) => {
+                        info!("🎯 Pacote HELO UDP recebido de {}", addr);
                         addr
                     }
                     Err(e) => {
-                        error!("❌ Erro ao aguardar cliente UDP: {}", e);
+                        error!("❌ Erro ao aguardar HELO UDP: {}", e);
                         continue;
                     }
                 }
             }
         };
+
+        // Cancela a sessão anterior se existir
+        if let Some(tx) = session_cancel.take() {
+            info!("🔄 Novo cliente detectado — encerrando sessão anterior...");
+            let _ = tx.send(());
+        }
 
         info!("🚀 Iniciando transmissão UDP de vídeo para {}", client_udp_target);
 
@@ -111,14 +126,22 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
 
                 let udp_sender_clone = udp_sender.clone();
                 let fec_encoder_clone = fec_encoder.clone();
+                let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+                session_cancel = Some(cancel_tx);
 
                 tokio::spawn(async move {
                     let mut extractor = NalExtractor::new();
                     let mut buf = [0u8; 16384];
                     let mut frame_counter: u32 = 0;
 
-                            loop {
-                                match tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
+                    loop {
+                        tokio::select! {
+                            _ = &mut cancel_rx => {
+                                info!("🛑 Sessão cancelada por novo cliente.");
+                                break;
+                            }
+                            result = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf) => {
+                                match result {
                                     Ok(0) => break, // EOF
                                     Ok(n) => {
                                         let frames = extractor.push_bytes(&buf[..n]);
@@ -135,16 +158,18 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
                                     }
                                 }
                             }
+                        }
+                    }
 
-                            info!("🛑 Encerrando sessão FFmpeg...");
-                            let _ = child.kill().await;
-                            let _ = child.wait().await;
-                        });
-                    }
-                    Err(e) => {
-                        error!("❌ Falha ao iniciar FFmpeg: {}", e);
-                    }
-                }
+                    info!("🛑 Encerrando sessão FFmpeg...");
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                });
+            }
+            Err(e) => {
+                error!("❌ Falha ao iniciar FFmpeg: {}", e);
+            }
+        }
     }
 }
 

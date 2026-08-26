@@ -30,6 +30,7 @@ final class UdpVideoReceiver {
     }
 
     func start(host: String, port: UInt16 = 5000) {
+        // Canal de vídeo UDP (recebe frames RTP/FEC do servidor)
         let udpParams = NWParameters.udp
         udpParams.allowLocalEndpointReuse = true
         udpParams.serviceClass = .interactiveVideo
@@ -43,9 +44,22 @@ final class UdpVideoReceiver {
             switch state {
             case .ready:
                 print("📡 Canal UDP de Vídeo conectado ao servidor (\(host):\(port))")
-                // Envia pacote HELO para registrar IP/porta no servidor
-                let heloData = "RS_HELO".data(using: .utf8)!
-                conn?.send(content: heloData, completion: .contentProcessed({ _ in }))
+                // Envia HELO na porta 5002 (canal de descoberta, separado do canal de vídeo)
+                let heloParams = NWParameters.udp
+                let heloEndpoint = NWEndpoint.hostPort(
+                    host: NWEndpoint.Host(host),
+                    port: NWEndpoint.Port(integerLiteral: 5002)
+                )
+                let heloConn = NWConnection(to: heloEndpoint, using: heloParams)
+                heloConn.stateUpdateHandler = { state in
+                    if case .ready = state {
+                        let heloData = "RS_HELO".data(using: .utf8)!
+                        heloConn.send(content: heloData, completion: .contentProcessed({ _ in
+                            heloConn.cancel()
+                        }))
+                    }
+                }
+                heloConn.start(queue: self.queue)
                 if let conn = conn {
                     self.receivePackets(on: conn)
                 }

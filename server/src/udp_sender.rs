@@ -65,12 +65,4 @@ impl UdpSender {
 
         Ok(())
     }
-
-    /// Aguarda um pacote de descoberta (HELO) de um cliente para obter seu endereço UDP de retorno
-    pub async fn wait_for_client(&self) -> Result<SocketAddr> {
-        let mut buf = [0u8; 128];
-        let (_len, addr) = self.socket.recv_from(&mut buf).await?;
-        info!("🎯 Cliente UDP detectado de {}", addr);
-        Ok(addr)
-    }
 }
