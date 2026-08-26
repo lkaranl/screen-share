@@ -13,11 +13,38 @@ final class InputManager {
     func handleMouseMoved(location: CGPoint, in viewBounds: CGRect) {
         guard viewBounds.width > 0 && viewBounds.height > 0 else { return }
 
-        let normX = Int32((location.x / viewBounds.width) * 32767.0)
+        // Correção de Aspect Ratio 16:9 (Letterbox / Pillarbox) estilo Moonlight
+        let targetAspect: CGFloat = 16.0 / 9.0
+        let viewAspect = viewBounds.width / viewBounds.height
+
+        var videoRect = viewBounds
+        if viewAspect > targetAspect {
+            let videoWidth = viewBounds.height * targetAspect
+            let offsetX = (viewBounds.width - videoWidth) / 2.0
+            videoRect = CGRect(x: offsetX, y: 0, width: videoWidth, height: viewBounds.height)
+        } else {
+            let videoHeight = viewBounds.width / targetAspect
+            let offsetY = (viewBounds.height - videoHeight) / 2.0
+            videoRect = CGRect(x: 0, y: offsetY, width: viewBounds.width, height: videoHeight)
+        }
+
+        // Clampa a posição dentro do retângulo ativo do vídeo
+        let clampedX = max(videoRect.minX, min(location.x, videoRect.maxX))
+        let clampedY = max(videoRect.minY, min(location.y, videoRect.maxY))
+
+        let normX = Int32(((clampedX - videoRect.minX) / videoRect.width) * 32767.0)
         // No macOS o eixo Y é invertido (de baixo para cima), normalizamos para cima -> baixo
-        let normY = Int32(((viewBounds.height - location.y) / viewBounds.height) * 32767.0)
+        let normY = Int32(((videoRect.maxY - clampedY) / videoRect.height) * 32767.0)
 
         controlClient?.send(.mouseMove(x: normX, y: normY))
+    }
+
+    func handleMouseDelta(deltaX: CGFloat, deltaY: CGFloat) {
+        let dx = Int32(deltaX)
+        let dy = Int32(deltaY)
+        if dx != 0 || dy != 0 {
+            controlClient?.send(.mouseMoveRelative(dx: dx, dy: dy))
+        }
     }
 
     func handleMouseDown(button: UInt8) {

@@ -4,6 +4,7 @@ import AppKit
 
 enum InputCommand: Encodable {
     case mouseMove(x: Int32, y: Int32)
+    case mouseMoveRelative(dx: Int32, dy: Int32)
     case mouseButton(button: UInt8, pressed: Bool)
     case mouseScroll(dy: Int32)
     case key(code: UInt16, pressed: Bool)
@@ -13,6 +14,7 @@ enum InputCommand: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case MouseMove
+        case MouseMoveRelative
         case MouseButton
         case MouseScroll
         case Key
@@ -24,6 +26,11 @@ enum InputCommand: Encodable {
     struct MouseMovePayload: Encodable {
         let x: Int32
         let y: Int32
+    }
+
+    struct MouseMoveRelativePayload: Encodable {
+        let dx: Int32
+        let dy: Int32
     }
 
     struct MouseButtonPayload: Encodable {
@@ -53,6 +60,8 @@ enum InputCommand: Encodable {
         switch self {
         case .mouseMove(let x, let y):
             try container.encode(MouseMovePayload(x: x, y: y), forKey: .MouseMove)
+        case .mouseMoveRelative(let dx, let dy):
+            try container.encode(MouseMoveRelativePayload(dx: dx, dy: dy), forKey: .MouseMoveRelative)
         case .mouseButton(let button, let pressed):
             try container.encode(MouseButtonPayload(button: button, pressed: pressed), forKey: .MouseButton)
         case .mouseScroll(let dy):

@@ -35,6 +35,11 @@ final class PixelBufferDisplayView: NSView {
         self.trackingArea = area
     }
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
     override var acceptsFirstResponder: Bool { true }
 
     override func mouseMoved(with event: NSEvent) {

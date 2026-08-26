@@ -10,11 +10,12 @@ use std::io::Write;
 
 use serde::{Serialize, Deserialize};
 
-/// Comandos de input enviados do WebRTC DataChannel para o thread uinput.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum InputCommand {
     /// Movimento absoluto do mouse (x, y normalizados de 0 a 32767)
     MouseMove { x: i32, y: i32 },
+    /// Movimento relativo do mouse (dx, dy em pixels, ideal para jogos 3D)
+    MouseMoveRelative { dx: i32, dy: i32 },
     /// Botão do mouse (0=esquerdo, 1=meio, 2=direito)
     MouseButton { button: u8, pressed: bool },
     /// Scroll do mouse (positivo = para baixo)
@@ -241,8 +242,10 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
     mouse_keys.insert(Key::BTN_SIDE);
     mouse_keys.insert(Key::BTN_EXTRA);
 
-    // Eixos relativos para scroll
+    // Eixos relativos para movimento e scroll
     let mut mouse_rel_axes = AttributeSet::<RelativeAxisType>::new();
+    mouse_rel_axes.insert(RelativeAxisType::REL_X);
+    mouse_rel_axes.insert(RelativeAxisType::REL_Y);
     mouse_rel_axes.insert(RelativeAxisType::REL_WHEEL);
     mouse_rel_axes.insert(RelativeAxisType::REL_HWHEEL);
 
@@ -264,7 +267,7 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
         .with_absolute_axis(&abs_y)?
         .build()?;
 
-    info!("🖱️  Mouse virtual criado");
+    info!("🖱️  Mouse virtual criado (Absoluto + Relativo)");
 
     // ── Configura dispositivo virtual de teclado ────────────────────────
     let mut kb_keys = AttributeSet::<Key>::new();
@@ -288,6 +291,14 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
                 let _ = mouse.emit(&[
                     InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_X.0, x),
                     InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_Y.0, y),
+                    InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
+                ]);
+            }
+
+            InputCommand::MouseMoveRelative { dx, dy } => {
+                let _ = mouse.emit(&[
+                    InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_X.0, dx),
+                    InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_Y.0, dy),
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
                 ]);
             }
