@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import AppKit
+import Network
 
 final class PixelBufferDisplayView: NSView {
     override var wantsUpdateLayer: Bool { true }
@@ -188,8 +189,45 @@ final class StreamSession: ObservableObject {
             NSPasteboard.general.setString(text, forType: .string)
         }
 
+        // 1. Inicia o listener UDP na porta 50000 ANTES do handshake TCP
+        videoReceiver.start()
+
+        // 2. Conecta controle e envia handshake de vídeo em paralelo
         controlClient.connect(host: host)
-        videoReceiver.start(host: host)
+        sendVideoHandshake(host: host)
+    }
+
+    /// Abre uma conexão TCP na porta 5000 e envia 2 bytes com a porta UDP de escuta (50000),
+    /// informando ao servidor para onde enviar os frames de vídeo.
+    private func sendVideoHandshake(host: String) {
+        let tcpOptions = NWProtocolTCP.Options()
+        tcpOptions.noDelay = true
+        tcpOptions.enableFastOpen = true
+        let params = NWParameters(tls: nil, tcp: tcpOptions)
+        let conn = NWConnection(
+            to: NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: 5000),
+            using: params
+        )
+
+        conn.stateUpdateHandler = { [weak conn] state in
+            switch state {
+            case .ready:
+                print("🔗 Canal de Handshake de Vídeo TCP conectado — informando porta UDP \(UdpVideoReceiver.videoListenPort)")
+                // Envia a porta UDP como 2 bytes big-endian
+                let port = UdpVideoReceiver.videoListenPort
+                let portBytes = withUnsafeBytes(of: port.bigEndian) { Data($0) }
+                conn?.send(content: portBytes, completion: .contentProcessed({ _ in
+                    conn?.cancel()
+                }))
+            case .failed(let err):
+                print("⚠️ Falha no handshake TCP de vídeo: \(err)")
+            default:
+                break
+            }
+        }
+
+        let q = DispatchQueue(label: "screenshare.tcp.video.handshake", qos: .userInitiated)
+        conn.start(queue: q)
     }
 
     func stop() {

@@ -3,7 +3,11 @@ import Network
 import CoreVideo
 
 final class UdpVideoReceiver {
-    private var udpConnection: NWConnection?
+    /// Porta local onde escutamos os frames UDP do servidor (fixa e conhecida)
+    static let videoListenPort: UInt16 = 50000
+
+    private var listener: NWListener?
+    private var activeConnection: NWConnection?
     private let queue = DispatchQueue(label: "screenshare.udp.video.queue", qos: .userInteractive)
 
     private let fecDecoder = FECDecoder()
@@ -29,52 +33,45 @@ final class UdpVideoReceiver {
         }
     }
 
-    func start(host: String, port: UInt16 = 5000) {
-        // Canal de vídeo UDP (recebe frames RTP/FEC do servidor)
+    /// Inicia o listener UDP na porta 50000 para receber frames do servidor.
+    /// Retorna a porta local confirmada (sempre 50000).
+    func start() {
         let udpParams = NWParameters.udp
         udpParams.allowLocalEndpointReuse = true
         udpParams.serviceClass = .interactiveVideo
 
-        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: NWEndpoint.Port(integerLiteral: port))
-        let conn = NWConnection(to: endpoint, using: udpParams)
-        self.udpConnection = conn
+        guard let listener = try? NWListener(using: udpParams, on: NWEndpoint.Port(rawValue: Self.videoListenPort)!) else {
+            print("❌ Falha ao criar NWListener na porta \(Self.videoListenPort)")
+            return
+        }
+        self.listener = listener
 
-        conn.stateUpdateHandler = { [weak self, weak conn] state in
-            guard let self = self else { return }
+        listener.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                print("📡 Canal UDP de Vídeo conectado ao servidor (\(host):\(port))")
-                // Envia HELO na porta 5002 (canal de descoberta, separado do canal de vídeo)
-                let heloParams = NWParameters.udp
-                let heloEndpoint = NWEndpoint.hostPort(
-                    host: NWEndpoint.Host(host),
-                    port: NWEndpoint.Port(integerLiteral: 5002)
-                )
-                let heloConn = NWConnection(to: heloEndpoint, using: heloParams)
-                heloConn.stateUpdateHandler = { state in
-                    if case .ready = state {
-                        let heloData = "RS_HELO".data(using: .utf8)!
-                        heloConn.send(content: heloData, completion: .contentProcessed({ _ in
-                            heloConn.cancel()
-                        }))
-                    }
-                }
-                heloConn.start(queue: self.queue)
-                if let conn = conn {
-                    self.receivePackets(on: conn)
-                }
+                print("📡 NWListener UDP de Vídeo pronto na porta \(Self.videoListenPort)")
             case .failed(let err):
-                print("⚠️ Erro no canal UDP de vídeo: \(err)")
+                print("❌ NWListener UDP falhou: \(err)")
             default:
                 break
             }
         }
 
-        conn.start(queue: queue)
+        listener.newConnectionHandler = { [weak self] conn in
+            guard let self = self else { return }
+            print("📡 Servidor conectou ao canal UDP de vídeo")
+            // Cancela conexão anterior se existir
+            self.activeConnection?.cancel()
+            self.activeConnection = conn
+            conn.start(queue: self.queue)
+            self.receivePackets(on: conn)
+        }
+
+        listener.start(queue: queue)
     }
 
     private func receivePackets(on connection: NWConnection) {
-        connection.receiveMessage { [weak self, weak connection] content, _, isComplete, error in
+        connection.receiveMessage { [weak self, weak connection] content, _, _, error in
             guard let self = self else { return }
 
             if let data = content, !data.isEmpty {
@@ -88,8 +85,10 @@ final class UdpVideoReceiver {
     }
 
     func stop() {
-        udpConnection?.cancel()
-        udpConnection = nil
+        activeConnection?.cancel()
+        activeConnection = nil
+        listener?.cancel()
+        listener = nil
     }
 
     deinit {
