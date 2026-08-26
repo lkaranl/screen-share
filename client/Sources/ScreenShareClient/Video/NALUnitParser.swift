@@ -29,18 +29,15 @@ final class NALUnitParser {
         buffer.append(data)
         var nalUnits: [NALUnit] = []
 
-        // Encontra todos os start codes no buffer atual
         let startCodes = findAllStartCodes(in: buffer)
-        guard startCodes.count >= 2 else {
+        guard !startCodes.isEmpty else {
             return nalUnits
         }
 
-        for i in 0..<(startCodes.count - 1) {
+        for i in 0..<startCodes.count {
             let current = startCodes[i]
-            let next = startCodes[i + 1]
-
             let payloadStart = current.offset + current.length
-            let payloadEnd = next.offset
+            let payloadEnd = (i + 1 < startCodes.count) ? startCodes[i + 1].offset : buffer.count
 
             if payloadEnd > payloadStart {
                 let nalData = buffer.subdata(in: payloadStart..<payloadEnd)
@@ -51,11 +48,7 @@ final class NALUnitParser {
             }
         }
 
-        // Mantém no buffer apenas os dados a partir do último start code
-        if let last = startCodes.last {
-            buffer.removeSubrange(0..<last.offset)
-        }
-
+        buffer.removeAll(keepingCapacity: true)
         return nalUnits
     }
 

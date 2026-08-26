@@ -141,10 +141,20 @@ final class HardwareDecoder {
     }
 
     private func setupDecompressionSession(format: CMVideoFormatDescription) {
+        if let currentFormat = self.formatDescription, self.decompressionSession != nil {
+            let currentDim = CMVideoFormatDescriptionGetDimensions(currentFormat)
+            let newDim = CMVideoFormatDescriptionGetDimensions(format)
+            if currentDim.width == newDim.width && currentDim.height == newDim.height {
+                return // Sessão de hardware já ativa e perfeitamente configurada
+            }
+        }
+
         if let session = decompressionSession {
             VTDecompressionSessionInvalidate(session)
             self.decompressionSession = nil
         }
+
+        self.formatDescription = format
 
         let destinationImageBufferAttributes: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
