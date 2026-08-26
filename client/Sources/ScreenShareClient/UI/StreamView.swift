@@ -21,6 +21,12 @@ final class PixelBufferDisplayView: NSView {
         layer?.contentsGravity = .resizeAspect
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+        window?.makeFirstResponder(self)
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let area = trackingArea {
@@ -64,6 +70,9 @@ final class PixelBufferDisplayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let location = convert(event.locationInWindow, from: nil)
+        inputManager?.handleMouseMoved(location: location, in: bounds)
         inputManager?.handleMouseDown(button: 0)
     }
 
@@ -72,6 +81,9 @@ final class PixelBufferDisplayView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let location = convert(event.locationInWindow, from: nil)
+        inputManager?.handleMouseMoved(location: location, in: bounds)
         inputManager?.handleMouseDown(button: 2)
     }
 
@@ -80,6 +92,9 @@ final class PixelBufferDisplayView: NSView {
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let location = convert(event.locationInWindow, from: nil)
+        inputManager?.handleMouseMoved(location: location, in: bounds)
         let btn: UInt8 = event.buttonNumber == 2 ? 1 : (event.buttonNumber == 3 ? 3 : 4)
         inputManager?.handleMouseDown(button: btn)
     }

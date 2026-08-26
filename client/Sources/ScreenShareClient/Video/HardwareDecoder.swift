@@ -95,7 +95,9 @@ final class HardwareDecoder {
                 )
 
                 if status == noErr, let format = newFormatDesc {
-                    self.formatDescription = format
+                    if let current = self.formatDescription, CMFormatDescriptionEqual(current, otherFormatDescription: format) {
+                        return // Formato exatamente idêntico, sessão atual continua válida
+                    }
                     let dim = CMVideoFormatDescriptionGetDimensions(format)
                     print("✅ Formato H.264 detectado por Hardware: \(dim.width)x\(dim.height)")
                     self.setupDecompressionSession(format: format)
@@ -130,7 +132,9 @@ final class HardwareDecoder {
                     )
 
                     if status == noErr, let format = newFormatDesc {
-                        self.formatDescription = format
+                        if let current = self.formatDescription, CMFormatDescriptionEqual(current, otherFormatDescription: format) {
+                            return // Formato exatamente idêntico, sessão atual continua válida
+                        }
                         let dim = CMVideoFormatDescriptionGetDimensions(format)
                         print("✅ Formato HEVC/H.265 detectado por Hardware: \(dim.width)x\(dim.height)")
                         self.setupDecompressionSession(format: format)
@@ -141,14 +145,6 @@ final class HardwareDecoder {
     }
 
     private func setupDecompressionSession(format: CMVideoFormatDescription) {
-        if let currentFormat = self.formatDescription, self.decompressionSession != nil {
-            let currentDim = CMVideoFormatDescriptionGetDimensions(currentFormat)
-            let newDim = CMVideoFormatDescriptionGetDimensions(format)
-            if currentDim.width == newDim.width && currentDim.height == newDim.height {
-                return // Sessão de hardware já ativa e perfeitamente configurada
-            }
-        }
-
         if let session = decompressionSession {
             VTDecompressionSessionInvalidate(session)
             self.decompressionSession = nil

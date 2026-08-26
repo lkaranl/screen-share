@@ -241,6 +241,8 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
     mouse_keys.insert(Key::BTN_MIDDLE);
     mouse_keys.insert(Key::BTN_SIDE);
     mouse_keys.insert(Key::BTN_EXTRA);
+    mouse_keys.insert(Key::BTN_TOUCH);
+    mouse_keys.insert(Key::BTN_TOOL_PEN);
 
     // Eixos relativos para movimento e scroll
     let mut mouse_rel_axes = AttributeSet::<RelativeAxisType>::new();
@@ -312,10 +314,19 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
                     4 => Key::BTN_EXTRA.code(),
                     _ => continue,
                 };
-                let _ = mouse.emit(&[
-                    InputEvent::new(EventType::KEY, btn_code, if pressed { 1 } else { 0 }),
-                    InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
-                ]);
+                let val = if pressed { 1 } else { 0 };
+                if button == 0 {
+                    let _ = mouse.emit(&[
+                        InputEvent::new(EventType::KEY, btn_code, val),
+                        InputEvent::new(EventType::KEY, Key::BTN_TOUCH.code(), val),
+                        InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
+                    ]);
+                } else {
+                    let _ = mouse.emit(&[
+                        InputEvent::new(EventType::KEY, btn_code, val),
+                        InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
+                    ]);
+                }
             }
 
             InputCommand::MouseScroll { dy } => {
