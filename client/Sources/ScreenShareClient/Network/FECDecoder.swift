@@ -256,6 +256,9 @@ final class FECDecoder {
                 if let fullFrameData = collector.reconstructPayload() {
                     self.lastEmittedFrame = collector.frameIndex
                     self.frames.removeValue(forKey: collector.frameIndex)
+                    if collector.frameIndex % 60 == 1 {
+                        print("📦 Frame RTP/FEC #\(collector.frameIndex) reconstruído (\(fullFrameData.count) bytes, \(collector.totalDataShards) shards)")
+                    }
                     self.onFrameReconstructed?(fullFrameData, collector.codec)
                 }
             }

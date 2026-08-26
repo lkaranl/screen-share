@@ -68,10 +68,10 @@ final class HardwareDecoder {
                 ppsData = nalUnit.data
                 createHEVCFormatDescription()
             }
-        case 0...31: // Todos os VCL Slices (TRAIL_N, TRAIL_R, TSA, STSA, RADL, RASL, BLA, IDR, CRA_NUT 21)
+        case 0...31: // Todos os VCL Slices
             decodeSlice(from: nalUnit.data)
         default:
-            break
+            print("ℹ️ NAL Unit HEVC tipo desconhecido: \(nalUnit.type) (\(nalUnit.data.count) bytes)")
         }
     }
 
@@ -169,7 +169,14 @@ final class HardwareDecoder {
 
                 if status == noErr, let pixelBuffer = imageBuffer {
                     decoder.totalFramesDecoded += 1
+                    if decoder.totalFramesDecoded % 60 == 1 {
+                        let w = CVPixelBufferGetWidth(pixelBuffer)
+                        let h = CVPixelBufferGetHeight(pixelBuffer)
+                        print("🖼️ Frame decodificado com sucesso via VideoToolbox #\(decoder.totalFramesDecoded) (\(w)x\(h))")
+                    }
                     decoder.onPixelBufferReady?(pixelBuffer)
+                } else {
+                    print("⚠️ Erro no callback de descompressão VideoToolbox: status \(status) (infoFlags: \(infoFlags.rawValue))")
                 }
             },
             decompressionOutputRefCon: Unmanaged.passUnretained(self).toOpaque()
@@ -197,7 +204,10 @@ final class HardwareDecoder {
     }
 
     private func decodeSlice(from nalData: Data) {
-        guard let formatDesc = formatDescription, let session = decompressionSession else { return }
+        guard let formatDesc = formatDescription, let session = decompressionSession else {
+            print("⚠️ decodeSlice ignorado: formatDesc=\(formatDescription != nil) session=\(decompressionSession != nil)")
+            return
+        }
 
         var blockBuffer: CMBlockBuffer?
         let totalLength = nalData.count + 4
@@ -213,7 +223,10 @@ final class HardwareDecoder {
             blockBufferOut: &blockBuffer
         )
 
-        guard status == noErr, let buffer = blockBuffer else { return }
+        guard status == noErr, let buffer = blockBuffer else {
+            print("⚠️ Erro CMBlockBufferCreate: \(status)")
+            return
+        }
 
         // Prefixo de 4 bytes com o tamanho do NAL em Big-Endian (Formato AVCC)
         var lengthBigEndian = UInt32(nalData.count).bigEndian
@@ -223,7 +236,10 @@ final class HardwareDecoder {
             offsetIntoDestination: 0,
             dataLength: 4
         )
-        guard status == noErr else { return }
+        guard status == noErr else {
+            print("⚠️ Erro CMBlockBufferReplaceDataBytes header: \(status)")
+            return
+        }
 
         nalData.withUnsafeBytes { rawPtr in
             if let baseAddress = rawPtr.baseAddress {
@@ -260,13 +276,18 @@ final class HardwareDecoder {
 
         if status == noErr, let sample = sampleBuffer {
             var flagsOut: VTDecodeInfoFlags = []
-            VTDecompressionSessionDecodeFrame(
+            let decodeStatus = VTDecompressionSessionDecodeFrame(
                 session,
                 sampleBuffer: sample,
                 flags: [._EnableAsynchronousDecompression],
                 frameRefcon: nil,
                 infoFlagsOut: &flagsOut
             )
+            if decodeStatus != noErr {
+                print("⚠️ VTDecompressionSessionDecodeFrame retornou erro: \(decodeStatus)")
+            }
+        } else {
+            print("⚠️ CMSampleBufferCreate retornou erro: \(status)")
         }
     }
 

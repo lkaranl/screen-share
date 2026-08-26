@@ -54,30 +54,21 @@ final class NALUnitParser {
 
     private func findAllStartCodes(in data: Data) -> [StartCode] {
         var results: [StartCode] = []
-        guard data.count >= 3 else { return results }
+        let count = data.count
+        guard count >= 3 else { return results }
 
         data.withUnsafeBytes { rawBuffer in
             guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-            let count = data.count
             var i = 0
-
             while i <= count - 3 {
                 if ptr[i] == 0 && ptr[i + 1] == 0 {
-                    if ptr[i + 2] == 1 {
-                        // 0x00 0x00 0x01 (3 bytes)
-                        // Verifica se é 4 bytes (0x00 0x00 0x00 0x01)
-                        if i > 0 && ptr[i - 1] == 0 {
-                            // Já teria sido capturado ou o anterior é 0
-                            results.append(StartCode(offset: i - 1, length: 4))
-                        } else {
-                            results.append(StartCode(offset: i, length: 3))
-                        }
-                        i += 3
-                        continue
-                    } else if i + 3 < count && ptr[i + 2] == 0 && ptr[i + 3] == 1 {
-                        // 0x00 0x00 0x00 0x01 (4 bytes)
+                    if i <= count - 4 && ptr[i + 2] == 0 && ptr[i + 3] == 1 {
                         results.append(StartCode(offset: i, length: 4))
                         i += 4
+                        continue
+                    } else if ptr[i + 2] == 1 {
+                        results.append(StartCode(offset: i, length: 3))
+                        i += 3
                         continue
                     }
                 }
