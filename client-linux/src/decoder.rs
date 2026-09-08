@@ -9,16 +9,15 @@ use std::sync::{
 use std::thread;
 use tracing::{error, info, warn};
 
-#[allow(dead_code)]
-pub struct YuvFrame {
+pub struct DecodedImage {
     pub width: usize,
     pub height: usize,
-    pub data: Vec<u8>,
+    pub pixels: Vec<u32>,
 }
 
 pub struct VideoDecoder {
     child: Option<Child>,
-    latest_frame: Arc<Mutex<Option<YuvFrame>>>,
+    latest_frame: Arc<Mutex<Option<DecodedImage>>>,
     running: Arc<AtomicBool>,
 }
 
@@ -30,14 +29,15 @@ impl VideoDecoder {
         mut frame_rx: tokio::sync::mpsc::Receiver<DecodedFrame>,
     ) -> Result<Self> {
         let codec_name = if codec == 1 { "hevc" } else { "h264" };
-        let frame_size = (width * height * 3) / 2;
+        let num_pixels = width * height;
+        let bytes_per_frame = num_pixels * 4;
 
         info!(
             "🎬 Inicializando pipeline de decodificação FFmpeg (Codec: {}, Resolução: {}x{})...",
             codec_name, width, height
         );
 
-        // Dispara o processo FFmpeg otimizado para baixa latência em pipe
+        // FFmpeg decodifica em bgr0 (equivalente a 0x00RRGGBB em little-endian)
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&[
             "-loglevel", "error",
@@ -46,7 +46,7 @@ impl VideoDecoder {
             "-f", codec_name,
             "-i", "pipe:0",
             "-f", "rawvideo",
-            "-pix_fmt", "yuv420p",
+            "-pix_fmt", "bgr0",
             "pipe:1",
         ])
         .stdin(Stdio::piped())
@@ -75,7 +75,7 @@ impl VideoDecoder {
         let latest_frame = Arc::new(Mutex::new(None));
         let latest_frame_clone = latest_frame.clone();
 
-        // 1. Thread de escrita: NAL frames -> ffmpeg stdin
+        // 1. Thread assíncrona de escrita: NAL frames -> ffmpeg stdin
         tokio::spawn(async move {
             while let Some(decoded_frame) = frame_rx.recv().await {
                 if !running_write.load(Ordering::Relaxed) {
@@ -90,17 +90,23 @@ impl VideoDecoder {
             info!("🛑 Encerrada thread de escrita do decodificador.");
         });
 
-        // 2. Thread de leitura OS: ffmpeg stdout -> YuvFrame
+        // 2. Thread OS de leitura: ffmpeg stdout -> DecodedImage (u32 pixels)
         thread::spawn(move || {
-            let mut buffer = vec![0u8; frame_size];
+            let mut byte_buffer = vec![0u8; bytes_per_frame];
 
             while running_read.load(Ordering::Relaxed) {
-                match stdout.read_exact(&mut buffer) {
+                match stdout.read_exact(&mut byte_buffer) {
                     Ok(()) => {
-                        let frame = YuvFrame {
+                        let mut pixels = vec![0u32; num_pixels];
+                        // Conversão zero-overhead dos 4 bytes para u32 nativo
+                        for (i, chunk) in byte_buffer.chunks_exact(4).enumerate() {
+                            pixels[i] = u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        }
+
+                        let frame = DecodedImage {
                             width,
                             height,
-                            data: buffer.clone(),
+                            pixels,
                         };
                         let mut lock = latest_frame_clone.lock().unwrap();
                         *lock = Some(frame);
@@ -123,8 +129,8 @@ impl VideoDecoder {
         })
     }
 
-    /// Retorna o último frame YUV decodificado, se houver um novo disponível
-    pub fn take_latest_frame(&self) -> Option<YuvFrame> {
+    /// Retorna o último frame de pixels decodificado, se houver um novo disponível
+    pub fn take_latest_frame(&self) -> Option<DecodedImage> {
         let mut lock = self.latest_frame.lock().unwrap();
         lock.take()
     }

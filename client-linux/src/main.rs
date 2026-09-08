@@ -11,7 +11,7 @@ mod scancode;
 
 use control::ControlClient;
 use decoder::VideoDecoder;
-use display::DisplayWindow;
+use display::DisplayApp;
 use network::NetworkReceiver;
 
 fn main() -> Result<()> {
@@ -134,9 +134,9 @@ fn main() -> Result<()> {
         Ok::<(VideoDecoder, ControlClient, NetworkReceiver), anyhow::Error>((video_decoder, control_client, network_receiver))
     })?;
 
-    // 5. Inicia a janela gráfica de exibição SDL2 diretamente na thread principal (requisito Wayland/X11/macOS)
-    let display = DisplayWindow::new(width, height)?;
-    display.run(video_decoder, control_client)?;
+    // 5. Inicia a janela gráfica de exibição Winit/Softbuffer diretamente na thread principal (requisito Wayland/X11/macOS)
+    let app = DisplayApp::new(width, height, video_decoder, control_client);
+    app.run()?;
 
     info!("🛑 Client encerrado com sucesso.");
     Ok(())

@@ -2,7 +2,7 @@
 name = "client-linux"
 version = "0.1.0"
 edition = "2021"
-description = "Screen sharing client for Linux in Rust using SDL2 and low-latency UDP RTP/FEC"
+description = "Screen sharing client for Linux in Rust using Winit, Softbuffer and low-latency UDP RTP/FEC"
 
 [[bin]]
 name = "client-linux"
@@ -17,8 +17,10 @@ tokio = { version = "1", features = ["full"] }
 # Socket de rede de baixo nível para buffers ampliados e QoS DSCP
 socket2 = "0.5"
 
-# Multimídia (janela, textura GPU YUV streaming e captura de mouse/teclado)
-sdl2 = { version = "0.37", default-features = false, features = ["use-pkgconfig"] }
+# Multimídia (janela nativa Wayland/X11 e apresentação de buffer 100% Rust)
+winit = "0.30"
+softbuffer = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
 
 # Serialização JSON (canal de controle TCP)
 serde = { version = "1", features = ["derive"] }

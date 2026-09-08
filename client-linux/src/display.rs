@@ -1,199 +1,211 @@
-use anyhow::{Context, Result};
+use anyhow::{Context as AnyhowContext, Result};
 use common::command::InputCommand;
-use sdl2::event::Event;
-use sdl2::mouse::MouseButton as SdlMouseButton;
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::render::TextureAccess;
-use std::time::Duration;
+use softbuffer::{Context, Surface};
+use std::num::NonZeroU32;
+use std::sync::Arc;
 use tracing::info;
+use winit::application::ApplicationHandler;
+use winit::dpi::LogicalSize;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::control::ControlClient;
-use crate::decoder::VideoDecoder;
-use crate::scancode::sdl_scancode_to_evdev;
+use crate::decoder::{DecodedImage, VideoDecoder};
+use crate::scancode::winit_key_to_evdev;
 
-pub struct DisplayWindow {
-    sdl_context: sdl2::Sdl,
-    video_subsystem: sdl2::VideoSubsystem,
+pub struct DisplayApp {
     width: u32,
     height: u32,
+    decoder: Option<VideoDecoder>,
+    control: Option<ControlClient>,
+    window: Option<Arc<Window>>,
+    surface: Option<Surface<Arc<Window>, Arc<Window>>>,
+    is_fullscreen: bool,
+    current_frame: Option<DecodedImage>,
 }
 
-impl DisplayWindow {
-    pub fn new(width: u32, height: u32) -> Result<Self> {
-        let sdl_context = sdl2::init().map_err(|e| anyhow::anyhow!("Erro ao inicializar SDL2: {}", e))?;
-        let video_subsystem = sdl_context.video().map_err(|e| anyhow::anyhow!("Erro ao inicializar SDL2 Video: {}", e))?;
-
-        Ok(Self {
-            sdl_context,
-            video_subsystem,
+impl DisplayApp {
+    pub fn new(width: u32, height: u32, decoder: VideoDecoder, control: ControlClient) -> Self {
+        Self {
             width,
             height,
-        })
+            decoder: Some(decoder),
+            control: Some(control),
+            window: None,
+            surface: None,
+            is_fullscreen: false,
+            current_frame: None,
+        }
     }
 
-    pub fn run(
-        self,
-        decoder: VideoDecoder,
-        control: ControlClient,
-    ) -> Result<()> {
-        let window = self
-            .video_subsystem
-            .window("Screen Share Client (Linux)", self.width, self.height)
-            .position_centered()
-            .resizable()
-            .build()
-            .context("Falha ao criar janela SDL2")?;
+    pub fn run(mut self) -> Result<()> {
+        let event_loop = EventLoop::new().context("Falha ao inicializar EventLoop do Winit")?;
+        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.run_app(&mut self).context("Erro no loop de eventos da janela")?;
+        Ok(())
+    }
+}
 
-        let mut canvas = window
-            .into_canvas()
-            .accelerated()
-            .present_vsync()
-            .build()
-            .context("Falha ao criar canvas acelerado SDL2")?;
+impl ApplicationHandler for DisplayApp {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
 
-        let texture_creator = canvas.texture_creator();
-        let mut texture = texture_creator
-            .create_texture(
-                PixelFormatEnum::IYUV,
-                TextureAccess::Streaming,
-                self.width,
-                self.height,
-            )
-            .context("Falha ao criar textura IYUV no SDL2")?;
+        let win_attr = Window::default_attributes()
+            .with_title("Screen Share Client (Linux)")
+            .with_inner_size(LogicalSize::new(self.width as f64, self.height as f64))
+            .with_resizable(true);
 
-        let mut event_pump = self
-            .sdl_context
-            .event_pump()
-            .map_err(|e| anyhow::anyhow!("Falha ao obter event pump SDL2: {}", e))?;
+        match event_loop.create_window(win_attr) {
+            Ok(win) => {
+                let window = Arc::new(win);
+                match Context::new(window.clone()) {
+                    Ok(context) => match Surface::new(&context, window.clone()) {
+                        Ok(surface) => {
+                            info!(
+                                "🖥️ Janela Winit criada com sucesso ({}x{}). F11 alterna tela cheia.",
+                                self.width, self.height
+                            );
+                            self.window = Some(window);
+                            self.surface = Some(surface);
+                        }
+                        Err(e) => info!("Erro ao criar Surface softbuffer: {}", e),
+                    },
+                    Err(e) => info!("Erro ao criar Context softbuffer: {}", e),
+                }
+            }
+            Err(e) => info!("Falha ao criar janela Winit: {}", e),
+        }
+    }
 
-        info!("🖥️ Janela de exibição iniciada ({}x{}). F11 para alternar tela cheia.", self.width, self.height);
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequested => {
+                info!("👋 Janela fechada pelo usuário.");
+                event_loop.exit();
+            }
 
-        let mut is_fullscreen = false;
-        let y_plane_size = (self.width * self.height) as usize;
-        let uv_plane_size = y_plane_size / 4;
-
-        'main_loop: loop {
-            // 1. Processamento de eventos de input (Mouse e Teclado)
-            for event in event_pump.poll_iter() {
-                match event {
-                    Event::Quit { .. } => {
-                        info!("👋 Janela fechada pelo usuário.");
-                        break 'main_loop;
+            WindowEvent::CursorMoved { position, .. } => {
+                if let (Some(window), Some(control)) = (&self.window, &self.control) {
+                    let win_size = window.inner_size();
+                    if win_size.width > 0 && win_size.height > 0 {
+                        let norm_x = ((position.x / win_size.width as f64).clamp(0.0, 1.0) * 32767.0) as i32;
+                        let norm_y = ((position.y / win_size.height as f64).clamp(0.0, 1.0) * 32767.0) as i32;
+                        control.send(InputCommand::MouseMove { x: norm_x, y: norm_y });
                     }
+                }
+            }
 
-                    Event::KeyDown { scancode: Some(scancode), keycode: _, repeat: false, .. } => {
-                        // F11: Alternar tela cheia
-                        if scancode == sdl2::keyboard::Scancode::F11 {
-                            is_fullscreen = !is_fullscreen;
-                            let mode = if is_fullscreen {
-                                sdl2::video::FullscreenType::Desktop
+            WindowEvent::MouseInput { state, button, .. } => {
+                if let Some(control) = &self.control {
+                    let btn_idx = match button {
+                        MouseButton::Left => 0,
+                        MouseButton::Middle => 1,
+                        MouseButton::Right => 2,
+                        MouseButton::Back => 3,
+                        MouseButton::Forward => 4,
+                        MouseButton::Other(c) => c as u8,
+                    };
+                    control.send(InputCommand::MouseButton {
+                        button: btn_idx,
+                        pressed: state == ElementState::Pressed,
+                    });
+                }
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                if let Some(control) = &self.control {
+                    let dy = match delta {
+                        MouseScrollDelta::LineDelta(_x, y) => (y * 120.0) as i32,
+                        MouseScrollDelta::PixelDelta(pos) => pos.y as i32,
+                    };
+                    if dy != 0 {
+                        control.send(InputCommand::MouseScroll { dy });
+                    }
+                }
+            }
+
+            WindowEvent::KeyboardInput { event: key_event, .. } => {
+                // F11 para alternar tela cheia
+                if let PhysicalKey::Code(KeyCode::F11) = key_event.physical_key {
+                    if key_event.state == ElementState::Pressed {
+                        if let Some(window) = &self.window {
+                            self.is_fullscreen = !self.is_fullscreen;
+                            if self.is_fullscreen {
+                                window.set_fullscreen(Some(Fullscreen::Borderless(None)));
                             } else {
-                                sdl2::video::FullscreenType::Off
-                            };
-                            let _ = canvas.window_mut().set_fullscreen(mode);
-                            continue;
+                                window.set_fullscreen(None);
+                            }
+                            return;
                         }
+                    }
+                }
 
-                        if let Some(evdev_code) = sdl_scancode_to_evdev(scancode) {
-                            control.send(InputCommand::Key {
-                                code: evdev_code,
-                                pressed: true,
-                            });
+                if let Some(evdev_code) = winit_key_to_evdev(key_event.physical_key) {
+                    if let Some(control) = &self.control {
+                        control.send(InputCommand::Key {
+                            code: evdev_code,
+                            pressed: key_event.state == ElementState::Pressed,
+                        });
+                    }
+                }
+            }
+
+            WindowEvent::RedrawRequested => {
+                if let (Some(window), Some(surface)) = (&self.window, &mut self.surface) {
+                    // Verifica se há novos pixels decodificados do stream
+                    if let Some(decoder) = &self.decoder {
+                        if let Some(frame) = decoder.take_latest_frame() {
+                            self.current_frame = Some(frame);
                         }
                     }
 
-                    Event::KeyUp { scancode: Some(scancode), repeat: false, .. } => {
-                        if let Some(evdev_code) = sdl_scancode_to_evdev(scancode) {
-                            control.send(InputCommand::Key {
-                                code: evdev_code,
-                                pressed: false,
-                            });
-                        }
-                    }
+                    if let Some(frame) = &self.current_frame {
+                        let win_size = window.inner_size();
+                        if let (Some(w), Some(h)) = (NonZeroU32::new(win_size.width), NonZeroU32::new(win_size.height)) {
+                            let _ = surface.resize(w, h);
+                            if let Ok(mut buffer) = surface.buffer_mut() {
+                                let target_len = (win_size.width * win_size.height) as usize;
+                                if frame.pixels.len() == target_len {
+                                    buffer.copy_from_slice(&frame.pixels);
+                                } else {
+                                    // Se o tamanho da janela for diferente da resolução do stream,
+                                    // realiza amostragem rápida / escala direta no buffer
+                                    let src_w = frame.width;
+                                    let src_h = frame.height;
+                                    let dst_w = win_size.width as usize;
+                                    let dst_h = win_size.height as usize;
 
-                    Event::MouseMotion { x, y, xrel, yrel, .. } => {
-                        let (win_w, win_h) = canvas.window().size();
-                        if win_w > 0 && win_h > 0 {
-                            // Coordenadas normalizadas 0..32767
-                            let norm_x = ((x as f32 / win_w as f32).clamp(0.0, 1.0) * 32767.0) as i32;
-                            let norm_y = ((y as f32 / win_h as f32).clamp(0.0, 1.0) * 32767.0) as i32;
-                            control.send(InputCommand::MouseMove { x: norm_x, y: norm_y });
-
-                            if xrel != 0 || yrel != 0 {
-                                control.send(InputCommand::MouseMoveRelative {
-                                    dx: xrel,
-                                    dy: yrel,
-                                });
+                                    for y in 0..dst_h {
+                                        let src_y = (y * src_h) / dst_h;
+                                        let dst_offset = y * dst_w;
+                                        let src_offset = src_y * src_w;
+                                        for x in 0..dst_w {
+                                            let src_x = (x * src_w) / dst_w;
+                                            if src_offset + src_x < frame.pixels.len() && dst_offset + x < buffer.len() {
+                                                buffer[dst_offset + x] = frame.pixels[src_offset + src_x];
+                                            }
+                                        }
+                                    }
+                                }
+                                let _ = buffer.present();
                             }
                         }
                     }
-
-                    Event::MouseButtonDown { mouse_btn, .. } => {
-                        let button_idx = match mouse_btn {
-                            SdlMouseButton::Left => 0,
-                            SdlMouseButton::Middle => 1,
-                            SdlMouseButton::Right => 2,
-                            SdlMouseButton::X1 => 3,
-                            SdlMouseButton::X2 => 4,
-                            _ => continue,
-                        };
-                        control.send(InputCommand::MouseButton {
-                            button: button_idx,
-                            pressed: true,
-                        });
-                    }
-
-                    Event::MouseButtonUp { mouse_btn, .. } => {
-                        let button_idx = match mouse_btn {
-                            SdlMouseButton::Left => 0,
-                            SdlMouseButton::Middle => 1,
-                            SdlMouseButton::Right => 2,
-                            SdlMouseButton::X1 => 3,
-                            SdlMouseButton::X2 => 4,
-                            _ => continue,
-                        };
-                        control.send(InputCommand::MouseButton {
-                            button: button_idx,
-                            pressed: false,
-                        });
-                    }
-
-                    Event::MouseWheel { y, .. } => {
-                        // Scroll: positivo = cima, negativo = baixo
-                        control.send(InputCommand::MouseScroll { dy: y });
-                    }
-
-                    _ => {}
                 }
             }
 
-            // 2. Renderização de Vídeo: verifica se há novo frame decodificado
-            if let Some(frame) = decoder.take_latest_frame() {
-                if frame.data.len() >= y_plane_size + uv_plane_size * 2 {
-                    let y_plane = &frame.data[0..y_plane_size];
-                    let u_plane = &frame.data[y_plane_size..y_plane_size + uv_plane_size];
-                    let v_plane = &frame.data[y_plane_size + uv_plane_size..y_plane_size + uv_plane_size * 2];
-
-                    let _ = texture.update_yuv(
-                        None,
-                        y_plane,
-                        self.width as usize,
-                        u_plane,
-                        (self.width / 2) as usize,
-                        v_plane,
-                        (self.width / 2) as usize,
-                    );
-
-                    canvas.clear();
-                    let _ = canvas.copy(&texture, None, None);
-                    canvas.present();
-                }
-            } else {
-                // Pequena pausa para evitar 100% de CPU quando ocioso
-                std::thread::sleep(Duration::from_millis(1));
-            }
+            _ => {}
         }
+    }
 
-        Ok(())
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = &self.window {
+            // Solicita novo redraw contínuo para taxa de quadros suave
+            window.request_redraw();
+        }
     }
 }
