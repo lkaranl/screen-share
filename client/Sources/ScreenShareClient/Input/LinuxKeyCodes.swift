@@ -59,8 +59,8 @@ enum LinuxKeyCodes {
         case 0x3E: return 97  // Right Ctrl
         case 0x3A: return 56  // Left Option / Alt
         case 0x3D: return 100 // Right Option / Alt
-        case 0x37: return 125 // Left Command (GUI)
-        case 0x36: return 126 // Right Command (GUI)
+        case 0x37: return 29  // Left Command -> Mapeado para Left Ctrl (Cmd+C/V/A/Z/X nativo do Mac vira Ctrl no Linux)
+        case 0x36: return 125 // Right Command -> Mapeado para Super (Tecla Windows/Super do Linux)
         case 0x39: return 58  // Caps Lock
 
         // Pontuação e Símbolos

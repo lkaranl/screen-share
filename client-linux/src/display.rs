@@ -24,6 +24,7 @@ pub struct DisplayApp {
     surface: Option<Surface<Arc<Window>, Arc<Window>>>,
     is_fullscreen: bool,
     current_frame: Option<DecodedImage>,
+    is_ctrl_pressed: bool,
 }
 
 impl DisplayApp {
@@ -37,6 +38,7 @@ impl DisplayApp {
             surface: None,
             is_fullscreen: false,
             current_frame: None,
+            is_ctrl_pressed: false,
         }
     }
 
@@ -129,9 +131,11 @@ impl ApplicationHandler for DisplayApp {
             }
 
             WindowEvent::KeyboardInput { event: key_event, .. } => {
+                let pressed = key_event.state == ElementState::Pressed;
+
                 // F11 para alternar tela cheia
                 if let PhysicalKey::Code(KeyCode::F11) = key_event.physical_key {
-                    if key_event.state == ElementState::Pressed {
+                    if pressed {
                         if let Some(window) = &self.window {
                             self.is_fullscreen = !self.is_fullscreen;
                             if self.is_fullscreen {
@@ -144,11 +148,68 @@ impl ApplicationHandler for DisplayApp {
                     }
                 }
 
+                // Rastreia modificador Control
+                match key_event.physical_key {
+                    PhysicalKey::Code(KeyCode::ControlLeft) | PhysicalKey::Code(KeyCode::ControlRight) => {
+                        self.is_ctrl_pressed = pressed;
+                    }
+                    _ => {}
+                }
+
+                // Sincronização inteligente de Clipboard para atalhos com Control
+                if self.is_ctrl_pressed {
+                    match key_event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyC) => {
+                            if let Some(control) = &self.control {
+                                control.send(InputCommand::Key { code: 46, pressed });
+                                if pressed {
+                                    let control_clone = control.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                        control_clone.send(InputCommand::ClipboardRequest);
+                                    });
+                                }
+                            }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::KeyX) => {
+                            if let Some(control) = &self.control {
+                                control.send(InputCommand::Key { code: 45, pressed });
+                                if pressed {
+                                    let control_clone = control.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                        control_clone.send(InputCommand::ClipboardRequest);
+                                    });
+                                }
+                            }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::KeyV) => {
+                            if pressed {
+                                if let Ok(text) = common::clipboard::get_system_clipboard() {
+                                    if !text.is_empty() {
+                                        if let Some(control) = &self.control {
+                                            control.send(InputCommand::ClipboardPaste { text });
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(control) = &self.control {
+                                control.send(InputCommand::Key { code: 47, pressed });
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+
                 if let Some(evdev_code) = winit_key_to_evdev(key_event.physical_key) {
                     if let Some(control) = &self.control {
                         control.send(InputCommand::Key {
                             code: evdev_code,
-                            pressed: key_event.state == ElementState::Pressed,
+                            pressed,
                         });
                     }
                 }

@@ -6,6 +6,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+#[derive(Clone)]
 pub struct ControlClient {
     tx: mpsc::Sender<InputCommand>,
 }
@@ -61,6 +62,9 @@ impl ControlClient {
                                 }
                                 ControlResponse::ClipboardSync { text } => {
                                     info!("📋 Clipboard recebido do servidor ({} bytes)", text.len());
+                                    if let Err(e) = common::clipboard::set_system_clipboard(&text) {
+                                        warn!("⚠️ Falha ao atualizar clipboard local: {}", e);
+                                    }
                                 }
                             }
                         }

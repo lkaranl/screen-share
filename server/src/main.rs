@@ -215,22 +215,37 @@ async fn run_control_server(input_tx: input::InputSender) -> Result<()> {
                                                 }
                                             }
                                             input::InputCommand::ClipboardRequest => {
-                                                if let Ok(text) = input::get_remote_clipboard() {
-                                                    let resp = input::ControlResponse::ClipboardSync { text };
-                                                    if let Ok(mut resp_json) = serde_json::to_string(&resp) {
-                                                        resp_json.push('\n');
-                                                        let _ = write_half.write_all(resp_json.as_bytes()).await;
+                                                match input::get_remote_clipboard() {
+                                                    Ok(text) => {
+                                                        info!("📋 Enviando clipboard remoto ao cliente ({} bytes)", text.len());
+                                                        let resp = input::ControlResponse::ClipboardSync { text };
+                                                        if let Ok(mut resp_json) = serde_json::to_string(&resp) {
+                                                            resp_json.push('\n');
+                                                            let _ = write_half.write_all(resp_json.as_bytes()).await;
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        warn!("⚠️ Não foi possível obter o clipboard remoto: {}", e);
                                                     }
                                                 }
                                             }
                                             input::InputCommand::ClipboardPaste { text } => {
-                                                let _ = input::set_remote_clipboard(&text);
+                                                info!("📋 Recebido texto para colar no servidor ({} bytes)", text.len());
+                                                if let Err(e) = input::set_remote_clipboard(&text) {
+                                                    warn!("⚠️ Falha ao setar clipboard no servidor: {}", e);
+                                                }
+                                                // Garante que Super (125/126) não interfira no Ctrl+V
+                                                let _ = input_tx.send(input::InputCommand::Key { code: 125, pressed: false }).await;
+                                                let _ = input_tx.send(input::InputCommand::Key { code: 126, pressed: false }).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+
+                                                // Pulsa Ctrl+V limpo
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 29, pressed: true }).await;
-                                                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 47, pressed: true }).await;
-                                                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 47, pressed: false }).await;
-                                                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                                                 let _ = input_tx.send(input::InputCommand::Key { code: 29, pressed: false }).await;
                                             }
                                             other => {

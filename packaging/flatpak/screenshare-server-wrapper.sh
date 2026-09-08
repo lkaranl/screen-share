@@ -30,5 +30,9 @@ if command -v notify-send > /dev/null 2>&1; then
         "Pronto para conexões!\nIP: ${LOCAL_IP}\nPorta: 5000 (Vídeo) / 5001 (Controle)" || true
 fi
 
+if [ -z "$WAYLAND_DISPLAY" ] && [ -S "/run/user/$(id -u)/wayland-0" ]; then
+    export WAYLAND_DISPLAY="wayland-0"
+fi
+
 # Inicia o executável Rust do servidor
 exec /app/bin/server "$@"

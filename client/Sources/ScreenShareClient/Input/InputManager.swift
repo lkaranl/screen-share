@@ -66,20 +66,37 @@ final class InputManager {
         let isCmd = modifierFlags.contains(.command)
         let isCtrl = modifierFlags.contains(.control)
 
-        // Cmd+V / Ctrl+V (Colar da área de transferência)
+        // Cmd+V / Ctrl+V (Colar da área de transferência com sincronização automática do Mac)
         if (isCmd || isCtrl) && keyCode == 0x09 { // 'V'
-            if let pasteboardText = NSPasteboard.general.string(forType: .string) {
+            if let pasteboardText = NSPasteboard.general.string(forType: .string), !pasteboardText.isEmpty {
                 controlClient?.send(.clipboardPaste(text: pasteboardText))
+                return
+            } else {
+                controlClient?.send(.key(code: 29, pressed: true))
+                controlClient?.send(.key(code: 47, pressed: true))
+                controlClient?.send(.key(code: 47, pressed: false))
                 return
             }
         }
 
-        // Cmd+C / Ctrl+C (Copiar)
+        // Cmd+C / Ctrl+C (Copiar seleção no servidor e puxar para o clipboard do Mac)
         if (isCmd || isCtrl) && keyCode == 0x08 { // 'C'
             controlClient?.send(.key(code: 29, pressed: true))  // Ctrl down
             controlClient?.send(.key(code: 46, pressed: true))  // C down
             controlClient?.send(.key(code: 46, pressed: false)) // C up
-            controlClient?.send(.key(code: 29, pressed: false)) // Ctrl up
+
+            // Aguarda a aplicação remota popular a área de transferência do Linux e sincroniza
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.controlClient?.send(.clipboardRequest)
+            }
+            return
+        }
+
+        // Cmd+X / Ctrl+X (Recortar seleção no servidor e puxar para o clipboard do Mac)
+        if (isCmd || isCtrl) && keyCode == 0x07 { // 'X'
+            controlClient?.send(.key(code: 29, pressed: true))  // Ctrl down
+            controlClient?.send(.key(code: 45, pressed: true))  // X down
+            controlClient?.send(.key(code: 45, pressed: false)) // X up
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 self?.controlClient?.send(.clipboardRequest)
@@ -97,7 +114,7 @@ final class InputManager {
         let isCmd = modifierFlags.contains(.command)
         let isCtrl = modifierFlags.contains(.control)
 
-        if (isCmd || isCtrl) && (keyCode == 0x09 || keyCode == 0x08) {
+        if (isCmd || isCtrl) && (keyCode == 0x09 || keyCode == 0x08 || keyCode == 0x07) {
             return
         }
 
@@ -119,7 +136,9 @@ final class InputManager {
             isPressed = modifierFlags.contains(.control)
         case 0x3A, 0x3D: // Left / Right Option (Alt)
             isPressed = modifierFlags.contains(.option)
-        case 0x37, 0x36: // Left / Right Command (Super)
+        case 0x37:       // Left Command (Atalhos Cmd mapeados para Ctrl no Linux)
+            isPressed = modifierFlags.contains(.command)
+        case 0x36:       // Right Command (Super / Windows no Linux)
             isPressed = modifierFlags.contains(.command)
         case 0x39:       // Caps Lock
             isPressed = modifierFlags.contains(.capsLock)
