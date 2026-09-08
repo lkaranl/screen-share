@@ -67,14 +67,14 @@ impl Default for CaptureConfig {
 ///
 /// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo.
 pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
-    // Pipeline: mantém frame na GPU via VAAPI e força amostragem de 60 FPS constantes
-    let vf = "hwmap=derive_device=vaapi,fps=60,scale_vaapi=format=nv12".to_string();
- 
+    // Pipeline: mantém frame na GPU via VAAPI e converte formato de cor para nv12 na GPU
+    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
+
     info!(
         "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={} gop={} codec={:?}",
         config.drm_device, config.render_device, config.framerate, config.bitrate, config.gop_size, config.codec
     );
- 
+
     let mut ffmpeg_args = vec![
         "-hide_banner".to_string(),
         "-loglevel".to_string(), "warning".to_string(),
@@ -89,12 +89,12 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         // ── Input: kmsgrab DRM/KMS ────────────────────────────────────────────
         "-f".to_string(), "kmsgrab".to_string(),
         "-device".to_string(), config.drm_device.clone(),
-        "-framerate".to_string(), "60".to_string(),
+        "-framerate".to_string(), config.framerate.to_string(),
         "-i".to_string(), config.drm_device.clone(),
         // ── Filtros GPU ───────────────────────────────────────────────────────
         "-vf".to_string(), vf,
     ];
- 
+
     match config.codec {
         VideoCodec::H264 => {
             ffmpeg_args.extend([
@@ -108,9 +108,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-g".to_string(), config.gop_size.to_string(),
                 "-aud".to_string(), "1".to_string(),
                 "-sei".to_string(), "0".to_string(),
-                "-bsf:v".to_string(), "h264_mp4toannexb".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
-                "-r".to_string(), "60".to_string(),
+                "-r".to_string(), config.framerate.to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "h264".to_string(),
                 "pipe:1".to_string(),
@@ -119,6 +118,7 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         VideoCodec::HEVC => {
             ffmpeg_args.extend([
                 "-c:v".to_string(), "hevc_vaapi".to_string(),
+                "-profile:v".to_string(), "main".to_string(),
                 "-bf".to_string(), "0".to_string(),
                 "-async_depth".to_string(), "1".to_string(),
                 "-rc_mode".to_string(), "CQP".to_string(),
@@ -126,9 +126,8 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
                 "-g".to_string(), config.gop_size.to_string(),
                 "-aud".to_string(), "1".to_string(),
                 "-sei".to_string(), "0".to_string(),
-                "-bsf:v".to_string(), "hevc_mp4toannexb".to_string(),
                 "-flush_packets".to_string(), "1".to_string(),
-                "-r".to_string(), "60".to_string(),
+                "-r".to_string(), config.framerate.to_string(),
                 "-an".to_string(),
                 "-f".to_string(), "hevc".to_string(),
                 "pipe:1".to_string(),
