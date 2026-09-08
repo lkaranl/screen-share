@@ -57,19 +57,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
+async fn run_video_udp_server(default_codec: capture::VideoCodec) -> Result<()> {
     let udp_sender = Arc::new(UdpSender::bind(5000).await?);
-    let codec_id = match codec {
-        capture::VideoCodec::H264 => 0u8,
-        capture::VideoCodec::HEVC => 1u8,
-        capture::VideoCodec::AV1 => 2u8,
-    };
-
     let fec_encoder = Arc::new(FecEncoder::new(20)); // 20% de tolerância a perdas (Reed-Solomon)
 
     // Handshake de sessão exclusivamente via TCP na porta 5000
     let tcp_listener = TcpListener::bind("0.0.0.0:5000").await?;
-    info!("🎥 Servidor de Vídeo pronto | Codec: {:?} | Aguardando cliente TCP na porta 5000", codec);
+    info!("🎥 Servidor de Vídeo pronto | Codec padrão: {:?} | Aguardando cliente TCP na porta 5000", default_codec);
 
     // Canal de cancelamento da sessão ativa (apenas um FFmpeg por vez)
     let mut session_cancel: Option<tokio::sync::oneshot::Sender<()>> = None;
@@ -80,18 +74,43 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
                 info!("🔗 Handshake TCP de sessão de {}", client_addr);
                 let _ = socket.set_nodelay(true);
 
-                // Lê 2 bytes do cliente: a porta UDP onde ele quer receber o vídeo
-                let mut port_buf = [0u8; 2];
-                let client_video_port = match tokio::io::AsyncReadExt::read_exact(&mut socket, &mut port_buf).await {
-                    Ok(_) => u16::from_be_bytes(port_buf),
-                    Err(_) => {
+                // Lê dados do handshake (2 bytes porta + 1 byte codec opcional)
+                let mut handshake_buf = [0u8; 3];
+                let mut active_codec = default_codec;
+                let client_video_port = match tokio::io::AsyncReadExt::read(&mut socket, &mut handshake_buf).await {
+                    Ok(n) if n >= 2 => {
+                        let port = u16::from_be_bytes([handshake_buf[0], handshake_buf[1]]);
+                        if n >= 3 {
+                            match handshake_buf[2] {
+                                0 => {
+                                    active_codec = capture::VideoCodec::H264;
+                                    info!("📦 Cliente solicitou codec H.264 no handshake");
+                                }
+                                1 => {
+                                    active_codec = capture::VideoCodec::HEVC;
+                                    info!("📦 Cliente solicitou codec HEVC no handshake");
+                                }
+                                other => {
+                                    warn!("⚠️ Código de codec desconhecido ({}) no handshake, usando padrão {:?}", other, default_codec);
+                                }
+                            }
+                        }
+                        port
+                    }
+                    _ => {
                         warn!("⚠️ Cliente conectou mas não enviou a porta UDP — usando porta 50000 padrão");
                         50000u16
                     }
                 };
 
+                let codec_id = match active_codec {
+                    capture::VideoCodec::H264 => 0u8,
+                    capture::VideoCodec::HEVC => 1u8,
+                    capture::VideoCodec::AV1 => 2u8,
+                };
+
                 let client_udp_target = SocketAddr::new(client_addr.ip(), client_video_port);
-                info!("🚀 Iniciando transmissão UDP de vídeo para {} (porta {})", client_udp_target, client_video_port);
+                info!("🚀 Iniciando transmissão UDP de vídeo ({:?}) para {} (porta {})", active_codec, client_udp_target, client_video_port);
 
                 // Cancela a sessão anterior se existir
                 if let Some(tx) = session_cancel.take() {
@@ -101,11 +120,11 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
                 }
 
                 let mut config = CaptureConfig::default();
-                config.codec = codec;
+                config.codec = active_codec;
 
                 match capture::spawn_ffmpeg(&config) {
                     Ok((mut child, mut stdout)) => {
-                        info!("🎬 FFmpeg iniciado ({:?}), transmitindo via RTP/UDP + FEC...", codec);
+                        info!("🎬 FFmpeg iniciado ({:?}), transmitindo via RTP/UDP + FEC...", active_codec);
 
                         let udp_sender_clone = udp_sender.clone();
                         let fec_encoder_clone = fec_encoder.clone();
@@ -113,7 +132,7 @@ async fn run_video_udp_server(codec: capture::VideoCodec) -> Result<()> {
                         session_cancel = Some(cancel_tx);
 
                         tokio::spawn(async move {
-                            let mut extractor = NalExtractor::new();
+                            let mut extractor = NalExtractor::new(active_codec);
                             let mut buf = [0u8; 16384];
                             let mut frame_counter: u32 = 0;
 

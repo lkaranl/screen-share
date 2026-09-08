@@ -4,8 +4,6 @@ import AppKit
 import Network
 
 final class PixelBufferDisplayView: NSView {
-    override var wantsUpdateLayer: Bool { true }
-
     var inputManager: InputManager?
     private var trackingArea: NSTrackingArea?
 
@@ -212,8 +210,8 @@ final class StreamSession: ObservableObject {
         sendVideoHandshake(host: host)
     }
 
-    /// Abre uma conexão TCP na porta 5000 e envia 2 bytes com a porta UDP de escuta (50000),
-    /// informando ao servidor para onde enviar os frames de vídeo.
+    /// Abre uma conexão TCP na porta 5000 e envia 3 bytes com a porta UDP de escuta (50000)
+    /// e o codec selecionado (0 = H.264, 1 = HEVC), informando ao servidor como inicializar o stream.
     private func sendVideoHandshake(host: String) {
         let tcpOptions = NWProtocolTCP.Options()
         tcpOptions.noDelay = true
@@ -224,14 +222,19 @@ final class StreamSession: ObservableObject {
             using: params
         )
 
+        let selectedCodec = self.codec
         conn.stateUpdateHandler = { [weak conn] state in
             switch state {
             case .ready:
-                print("🔗 Canal de Handshake de Vídeo TCP conectado — informando porta UDP \(UdpVideoReceiver.videoListenPort)")
-                // Envia a porta UDP como 2 bytes big-endian
-                let port = UdpVideoReceiver.videoListenPort
-                let portBytes = withUnsafeBytes(of: port.bigEndian) { Data($0) }
-                conn?.send(content: portBytes, completion: .contentProcessed({ _ in
+                print("🔗 Canal de Handshake de Vídeo TCP conectado — informando porta UDP \(UdpVideoReceiver.videoListenPort) e codec \(selectedCodec)")
+                // Envia a porta UDP como 2 bytes big-endian + 1 byte de codec (0 = H264, 1 = HEVC)
+                var handshakeBytes = Data()
+                var port = UdpVideoReceiver.videoListenPort.bigEndian
+                handshakeBytes.append(Data(bytes: &port, count: 2))
+                let codecByte: UInt8 = (selectedCodec == .hevc) ? 1 : 0
+                handshakeBytes.append(codecByte)
+
+                conn?.send(content: handshakeBytes, completion: .contentProcessed({ _ in
                     conn?.cancel()
                 }))
             case .failed(let err):

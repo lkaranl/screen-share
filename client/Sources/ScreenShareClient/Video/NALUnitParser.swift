@@ -13,11 +13,16 @@ struct NALUnit {
 
 final class NALUnitParser {
     private var buffer = Data()
-    private let codec: VideoCodecType
+    private var codec: VideoCodecType
     private var totalNALsParsed = 0
 
     init(codec: VideoCodecType) {
         self.codec = codec
+    }
+
+    func switchCodec(_ newCodec: VideoCodecType) {
+        self.codec = newCodec
+        self.buffer.removeAll(keepingCapacity: true)
     }
 
     struct StartCode {

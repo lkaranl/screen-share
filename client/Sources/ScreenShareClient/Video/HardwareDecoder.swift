@@ -4,7 +4,7 @@ import VideoToolbox
 import CoreVideo
 
 final class HardwareDecoder {
-    private let codec: VideoCodecType
+    private var codec: VideoCodecType
     private var formatDescription: CMVideoFormatDescription?
     private var decompressionSession: VTDecompressionSession?
 
@@ -21,6 +21,20 @@ final class HardwareDecoder {
 
     init(codec: VideoCodecType) {
         self.codec = codec
+    }
+
+    func switchCodec(_ newCodec: VideoCodecType) {
+        guard self.codec != newCodec else { return }
+        print("🔄 HardwareDecoder: Alternando codec de \(self.codec) para \(newCodec)")
+        self.codec = newCodec
+        if let session = decompressionSession {
+            VTDecompressionSessionInvalidate(session)
+            self.decompressionSession = nil
+        }
+        self.formatDescription = nil
+        self.spsData = nil
+        self.ppsData = nil
+        self.vpsData = nil
     }
 
     func decodeFrame(nalUnits: [NALUnit]) {
@@ -155,7 +169,8 @@ final class HardwareDecoder {
         self.formatDescription = format
 
         let destinationImageBufferAttributes: [CFString: Any] = [
-            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
             kCVPixelBufferMetalCompatibilityKey: true,
             kCVPixelBufferOpenGLCompatibilityKey: true
         ]

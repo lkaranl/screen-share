@@ -11,12 +11,14 @@ final class UdpVideoReceiver {
     private let queue = DispatchQueue(label: "screenshare.udp.video.queue", qos: .userInteractive)
 
     private let fecDecoder = FECDecoder()
+    private var currentCodec: VideoCodecType
     private let parser: NALUnitParser
     private let decoder: HardwareDecoder
 
     var onPixelBuffer: ((CVPixelBuffer) -> Void)?
 
     init(codec: VideoCodecType) {
+        self.currentCodec = codec
         self.parser = NALUnitParser(codec: codec)
         self.decoder = HardwareDecoder(codec: codec)
 
@@ -24,8 +26,17 @@ final class UdpVideoReceiver {
             self?.onPixelBuffer?(pixelBuffer)
         }
 
-        self.fecDecoder.onFrameReconstructed = { [weak self] (frameData: Data, _: UInt8) in
+        self.fecDecoder.onFrameReconstructed = { [weak self] (frameData: Data, packetCodec: UInt8) in
             guard let self = self else { return }
+
+            let streamCodec: VideoCodecType = (packetCodec == 1) ? .hevc : .h264
+            if self.currentCodec != streamCodec {
+                print("🔄 UdpVideoReceiver: Sincronizando codec com o stream recebido (\(self.currentCodec) -> \(streamCodec))")
+                self.currentCodec = streamCodec
+                self.parser.switchCodec(streamCodec)
+                self.decoder.switchCodec(streamCodec)
+            }
+
             let nalUnits = self.parser.parse(data: frameData)
             self.decoder.decodeFrame(nalUnits: nalUnits)
         }
