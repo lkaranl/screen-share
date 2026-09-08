@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.lkaranl.ScreenShareServer</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Screen Share Server</name>
+  <summary>Servidor de transmissão de tela de ultra baixa latência</summary>
+  <description>
+    <p>
+      O Screen Share Server é uma solução de transmissão e controle remoto de tela
+      desenvolvida em Rust com suporte a aceleração por hardware VAAPI (HEVC e H.264),
+      transmissão via pacotes RTP sobre UDP com Forward Error Correction (Reed-Solomon)
+      e controle de mouse e teclado virtuais de alta precisão.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.lkaranl.ScreenShareServer.desktop</launchable>
+  <url type="homepage">https://github.com/lkaranl/screen-share</url>
+  <url type="bugtracker">https://github.com/lkaranl/screen-share/issues</url>
+  <url type="vcs-browser">https://github.com/lkaranl/screen-share</url>
+
+  <developer id="io.github.lkaranl">
+    <name>Karan</name>
+  </developer>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Screen Share Server ativo transmitindo na rede local</caption>
+      <image>https://raw.githubusercontent.com/lkaranl/screen-share/main/packaging/flatpak/icons/512x512.png</image>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-09-08">
+      <description>
+        <p>Versão inicial do Screen Share Server com aceleração por hardware VAAPI (HEVC e H.264) e uinput sem sudo.</p>
+      </description>
+    </release>
+  </releases>
+
+  <provides>
+    <binary>server</binary>
+    <binary>screenshare-server-wrapper</binary>
+  </provides>
+</component>

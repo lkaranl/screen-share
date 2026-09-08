@@ -107,6 +107,29 @@ final class InputManager {
         }
     }
 
+    func handleFlagsChanged(modifierFlags: NSEvent.ModifierFlags, keyCode: UInt16) {
+        let linuxCode = LinuxKeyCodes.mapMacKeyToLinux(keyCode)
+        guard linuxCode > 0 else { return }
+
+        let isPressed: Bool
+        switch keyCode {
+        case 0x38, 0x3C: // Left / Right Shift
+            isPressed = modifierFlags.contains(.shift)
+        case 0x3B, 0x3E: // Left / Right Ctrl
+            isPressed = modifierFlags.contains(.control)
+        case 0x3A, 0x3D: // Left / Right Option (Alt)
+            isPressed = modifierFlags.contains(.option)
+        case 0x37, 0x36: // Left / Right Command (Super)
+            isPressed = modifierFlags.contains(.command)
+        case 0x39:       // Caps Lock
+            isPressed = modifierFlags.contains(.capsLock)
+        default:
+            return
+        }
+
+        controlClient?.send(.key(code: linuxCode, pressed: isPressed))
+    }
+
     private func flushPendingMouse() {
         if let pos = pendingMouse {
             controlClient?.send(.mouseMove(x: pos.x, y: pos.y))

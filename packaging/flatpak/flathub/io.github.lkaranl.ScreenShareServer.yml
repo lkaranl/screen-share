@@ -1,0 +1,48 @@
+app-id: io.github.lkaranl.ScreenShareServer
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: screenshare-server-wrapper
+
+finish-args:
+  # Rede: escutar nas portas 5000 (UDP/TCP) e 5001 (TCP)
+  - --share=network
+  - --share=ipc
+  # Acesso aos aceleradores gráficos e ao uinput (/dev/uinput)
+  - --device=all
+  # Interface gráfica e sockets de exibição
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Diretório de runtime para PipeWire / Wayland
+  - --filesystem=xdg-run/pipewire-0
+  # Notificações na área de trabalho
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/screenshare-server/cargo
+
+modules:
+  - name: screenshare-server
+    buildsystem: simple
+    build-commands:
+      # Compilação 100% offline utilizando os fontes empacotados pelo flatpak-cargo-generator
+      - cargo --offline build --release --manifest-path server/Cargo.toml
+      # Instalação dos binários
+      - install -Dm755 target/release/server /app/bin/server
+      - install -Dm755 packaging/flatpak/screenshare-server-wrapper.sh /app/bin/screenshare-server-wrapper
+      # Instalação dos metadados de desktop e AppStream
+      - install -Dm644 packaging/flatpak/io.github.lkaranl.ScreenShareServer.desktop /app/share/applications/io.github.lkaranl.ScreenShareServer.desktop
+      - install -Dm644 packaging/flatpak/io.github.lkaranl.ScreenShareServer.metainfo.xml /app/share/metainfo/io.github.lkaranl.ScreenShareServer.metainfo.xml
+      # Instalação de ícones hicolor (PNGs 16x16 até 512x512 + SVG escalável)
+      - for size in 16 32 48 64 128 256 512; do install -Dm644 packaging/flatpak/icons/${size}x${size}.png /app/share/icons/hicolor/${size}x${size}/apps/io.github.lkaranl.ScreenShareServer.png; done
+      - install -Dm644 packaging/flatpak/icons/io.github.lkaranl.ScreenShareServer.svg /app/share/icons/hicolor/scalable/apps/io.github.lkaranl.ScreenShareServer.svg
+    sources:
+      - type: git
+        url: https://github.com/lkaranl/screen-share.git
+        tag: v0.1.0
+      - cargo-sources.json

@@ -6,6 +6,7 @@ import Network
 final class PixelBufferDisplayView: NSView {
     var inputManager: InputManager?
     private var trackingArea: NSTrackingArea?
+    private var keyEventMonitor: Any?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -23,6 +24,36 @@ final class PixelBufferDisplayView: NSView {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
         window?.makeFirstResponder(self)
+
+        if window != nil && keyEventMonitor == nil {
+            keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+                guard let self = self, let win = self.window, event.window == win else {
+                    return event
+                }
+                switch event.type {
+                case .keyDown:
+                    self.inputManager?.handleKeyDown(keyCode: event.keyCode, modifierFlags: event.modifierFlags)
+                    return nil
+                case .keyUp:
+                    self.inputManager?.handleKeyUp(keyCode: event.keyCode, modifierFlags: event.modifierFlags)
+                    return nil
+                case .flagsChanged:
+                    self.inputManager?.handleFlagsChanged(modifierFlags: event.modifierFlags, keyCode: event.keyCode)
+                    return nil
+                default:
+                    return event
+                }
+            }
+        } else if window == nil, let monitor = keyEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyEventMonitor = nil
+        }
+    }
+
+    deinit {
+        if let monitor = keyEventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     override func updateTrackingAreas() {
@@ -46,6 +77,13 @@ final class PixelBufferDisplayView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+    override func becomeFirstResponder() -> Bool { true }
+    override func resignFirstResponder() -> Bool { true }
+
+    override func flagsChanged(with event: NSEvent) {
+        inputManager?.handleFlagsChanged(modifierFlags: event.modifierFlags, keyCode: event.keyCode)
+    }
 
     override func mouseMoved(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)

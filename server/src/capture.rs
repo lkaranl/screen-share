@@ -134,11 +134,25 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         }
     }
  
-    let mut child = Command::new("ffmpeg")
-        .args(&ffmpeg_args)
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&ffmpeg_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+
+    // No Fedora Silverblue ou distribuições imutáveis, drivers freeworld (com suporte a encoding proprietário)
+    // são frequentemente colocados em /usr/local/lib64/dri ou /usr/lib64/dri-freeworld.
+    // Garantimos que o FFmpeg encontre o driver mesmo se executado via sudo sem -E.
+    if std::env::var("LIBVA_DRIVERS_PATH").is_err() {
+        for path in &["/usr/local/lib64/dri", "/usr/lib64/dri-freeworld"] {
+            if std::path::Path::new(path).exists() {
+                cmd.env("LIBVA_DRIVERS_PATH", path);
+                break;
+            }
+        }
+    }
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {

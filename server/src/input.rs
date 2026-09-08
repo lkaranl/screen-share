@@ -234,48 +234,56 @@ pub fn start_input_handler() -> Result<InputSender> {
 
 /// Loop principal do handler de input — executa em thread OS (não async).
 fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
-    // ── Configura dispositivo virtual de mouse ──────────────────────────
+    // ── Dispositivo virtual de mouse ABSOLUTO (Tablet / Tela de toque) ──
     let mut mouse_keys = AttributeSet::<Key>::new();
     mouse_keys.insert(Key::BTN_LEFT);
     mouse_keys.insert(Key::BTN_RIGHT);
     mouse_keys.insert(Key::BTN_MIDDLE);
     mouse_keys.insert(Key::BTN_SIDE);
     mouse_keys.insert(Key::BTN_EXTRA);
-    mouse_keys.insert(Key::BTN_TOUCH);
-    mouse_keys.insert(Key::BTN_TOOL_PEN);
 
-    // Eixos relativos para movimento e scroll
+    // Eixos absolutos para X e Y (0 a 32767) com resolução 1
+    let abs_x = UinputAbsSetup::new(
+        AbsoluteAxisType::ABS_X,
+        AbsInfo::new(0, 0, 32767, 0, 0, 1),
+    );
+    let abs_y = UinputAbsSetup::new(
+        AbsoluteAxisType::ABS_Y,
+        AbsInfo::new(0, 0, 32767, 0, 0, 1),
+    );
+
+    let mut mouse_abs = VirtualDeviceBuilder::new()?
+        .name("screen-share-virtual-mouse-abs")
+        .with_keys(&mouse_keys)?
+        .with_absolute_axis(&abs_x)?
+        .with_absolute_axis(&abs_y)?
+        .build()?;
+
+    info!("🖱️  Mouse virtual Absoluto criado (0-32767)");
+
+    // ── Dispositivo virtual de mouse RELATIVO (Jogos 3D e Scroll) ───────
     let mut mouse_rel_axes = AttributeSet::<RelativeAxisType>::new();
     mouse_rel_axes.insert(RelativeAxisType::REL_X);
     mouse_rel_axes.insert(RelativeAxisType::REL_Y);
     mouse_rel_axes.insert(RelativeAxisType::REL_WHEEL);
     mouse_rel_axes.insert(RelativeAxisType::REL_HWHEEL);
 
-    // Eixos absolutos para X e Y (0 a 32767)
-    let abs_x = UinputAbsSetup::new(
-        AbsoluteAxisType::ABS_X,
-        AbsInfo::new(0, 0, 32767, 0, 0, 0),
-    );
-    let abs_y = UinputAbsSetup::new(
-        AbsoluteAxisType::ABS_Y,
-        AbsInfo::new(0, 0, 32767, 0, 0, 0),
-    );
-
-    let mut mouse = VirtualDeviceBuilder::new()?
-        .name("screen-share-virtual-mouse")
+    let mut mouse_rel = VirtualDeviceBuilder::new()?
+        .name("screen-share-virtual-mouse-rel")
         .with_keys(&mouse_keys)?
         .with_relative_axes(&mouse_rel_axes)?
-        .with_absolute_axis(&abs_x)?
-        .with_absolute_axis(&abs_y)?
         .build()?;
 
-    info!("🖱️  Mouse virtual criado (Absoluto + Relativo)");
+    info!("🖱️  Mouse virtual Relativo criado (Scroll + Deltas)");
 
     // ── Configura dispositivo virtual de teclado ────────────────────────
     let mut kb_keys = AttributeSet::<Key>::new();
-    // Adiciona todos os keycodes Linux relevantes (0-255)
-    for code in 1u16..=255 {
-        // Key(code) — o construtor por valor é aceito pelo AttributeSet
+    // Adiciona todos os keycodes Linux comuns (1-248), exceto botões de energia/suspensão
+    // para evitar que o systemd-logind capture o dispositivo exclusivamente
+    for code in 1u16..=248 {
+        if matches!(code, 116 | 142 | 143 | 205) {
+            continue; // Ignora KEY_POWER, KEY_SLEEP, KEY_WAKEUP, KEY_SUSPEND
+        }
         let _ = kb_keys.insert(Key::new(code));
     }
 
@@ -290,19 +298,23 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
     while let Some(cmd) = rx.blocking_recv() {
         match cmd {
             InputCommand::MouseMove { x, y } => {
-                let _ = mouse.emit(&[
+                if let Err(e) = mouse_abs.emit(&[
                     InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_X.0, x),
                     InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_Y.0, y),
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
-                ]);
+                ]) {
+                    error!("Erro ao emitir movimento de mouse absoluto: {}", e);
+                }
             }
 
             InputCommand::MouseMoveRelative { dx, dy } => {
-                let _ = mouse.emit(&[
+                if let Err(e) = mouse_rel.emit(&[
                     InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_X.0, dx),
                     InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_Y.0, dy),
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
-                ]);
+                ]) {
+                    error!("Erro ao emitir movimento de mouse relativo: {}", e);
+                }
             }
 
             InputCommand::MouseButton { button, pressed } => {
@@ -315,36 +327,34 @@ fn run_input_handler(mut rx: mpsc::Receiver<InputCommand>) -> Result<()> {
                     _ => continue,
                 };
                 let val = if pressed { 1 } else { 0 };
-                if button == 0 {
-                    let _ = mouse.emit(&[
-                        InputEvent::new(EventType::KEY, btn_code, val),
-                        InputEvent::new(EventType::KEY, Key::BTN_TOUCH.code(), val),
-                        InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
-                    ]);
-                } else {
-                    let _ = mouse.emit(&[
-                        InputEvent::new(EventType::KEY, btn_code, val),
-                        InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
-                    ]);
-                }
+                let evs = [
+                    InputEvent::new(EventType::KEY, btn_code, val),
+                    InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
+                ];
+                let _ = mouse_abs.emit(&evs);
+                let _ = mouse_rel.emit(&evs);
             }
 
             InputCommand::MouseScroll { dy } => {
                 // REL_WHEEL: positivo = scroll up, negativo = scroll down
-                let _ = mouse.emit(&[
+                if let Err(e) = mouse_rel.emit(&[
                     InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_WHEEL.0, dy),
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
-                ]);
+                ]) {
+                    error!("Erro ao emitir scroll: {}", e);
+                }
             }
 
             InputCommand::Key { code, pressed } => {
-                if code == 0 || code > 255 {
+                if code == 0 || code > 248 {
                     continue; // keycode inválido
                 }
-                let _ = keyboard.emit(&[
+                if let Err(e) = keyboard.emit(&[
                     InputEvent::new(EventType::KEY, code, if pressed { 1 } else { 0 }),
                     InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
-                ]);
+                ]) {
+                    error!("Erro ao emitir tecla {}: {}", code, e);
+                }
             }
 
             InputCommand::ClipboardPaste { .. } | InputCommand::ClipboardRequest | InputCommand::Ping { .. } => {}

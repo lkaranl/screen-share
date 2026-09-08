@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Screen Share Server
+Comment=Servidor de transmissão de tela em alta performance (RTP/UDP + FEC)
+Exec=screenshare-server-wrapper
+Icon=io.github.lkaranl.ScreenShareServer
+Terminal=false
+Type=Application
+Categories=Network;Utility;RemoteAccess;AudioVideo;
+Keywords=screen;share;streaming;remote;desktop;
+StartupNotify=true

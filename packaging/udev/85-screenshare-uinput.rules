@@ -1,0 +1,4 @@
+# Regra universal udev para o Screen Share Server
+# Permite que usuários na sessão local (tag uaccess) e membros do grupo input
+# criem dispositivos virtuais em /dev/uinput sem necessidade de privilégios de root (sudo).
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput", MODE="0660", GROUP="input"
