@@ -80,14 +80,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/bitvec/bitvec-1.0.1.crate",
-        "sha256": "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c",
-        "dest": "cargo/vendor/bitvec-1.0.1"
+        "url": "https://static.crates.io/crates/bitvec/bitvec-1.1.1.crate",
+        "sha256": "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837",
+        "dest": "cargo/vendor/bitvec-1.1.1"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c\", \"files\": {}}",
-        "dest": "cargo/vendor/bitvec-1.0.1",
+        "contents": "{\"package\": \"ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837\", \"files\": {}}",
+        "dest": "cargo/vendor/bitvec-1.1.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -483,6 +483,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/pkg-config/pkg-config-0.3.34.crate",
+        "sha256": "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548",
+        "dest": "cargo/vendor/pkg-config-0.3.34"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548\", \"files\": {}}",
+        "dest": "cargo/vendor/pkg-config-0.3.34",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.106.crate",
         "sha256": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
         "dest": "cargo/vendor/proc-macro2-1.0.106"
@@ -595,6 +608,32 @@
         "type": "inline",
         "contents": "{\"package\": \"94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49\", \"files\": {}}",
         "dest": "cargo/vendor/scopeguard-1.2.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/sdl2/sdl2-0.37.0.crate",
+        "sha256": "3b498da7d14d1ad6c839729bd4ad6fc11d90a57583605f3b4df2cd709a9cd380",
+        "dest": "cargo/vendor/sdl2-0.37.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"3b498da7d14d1ad6c839729bd4ad6fc11d90a57583605f3b4df2cd709a9cd380\", \"files\": {}}",
+        "dest": "cargo/vendor/sdl2-0.37.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/sdl2-sys/sdl2-sys-0.37.0.crate",
+        "sha256": "951deab27af08ed9c6068b7b0d05a93c91f0a8eb16b6b816a5e73452a43521d3",
+        "dest": "cargo/vendor/sdl2-sys-0.37.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"951deab27af08ed9c6068b7b0d05a93c91f0a8eb16b6b816a5e73452a43521d3\", \"files\": {}}",
+        "dest": "cargo/vendor/sdl2-sys-0.37.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -920,6 +959,19 @@
         "type": "inline",
         "contents": "{\"package\": \"ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65\", \"files\": {}}",
         "dest": "cargo/vendor/valuable-0.1.1",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/version-compare/version-compare-0.1.1.crate",
+        "sha256": "579a42fc0b8e0c63b76519a339be31bed574929511fa53c1a3acae26eb258f29",
+        "dest": "cargo/vendor/version-compare-0.1.1"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"579a42fc0b8e0c63b76519a339be31bed574929511fa53c1a3acae26eb258f29\", \"files\": {}}",
+        "dest": "cargo/vendor/version-compare-0.1.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {

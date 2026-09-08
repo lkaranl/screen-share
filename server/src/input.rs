@@ -8,33 +8,7 @@ use tracing::{error, info};
 use std::process::Command;
 use std::io::Write;
 
-use serde::{Serialize, Deserialize};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum InputCommand {
-    /// Movimento absoluto do mouse (x, y normalizados de 0 a 32767)
-    MouseMove { x: i32, y: i32 },
-    /// Movimento relativo do mouse (dx, dy em pixels, ideal para jogos 3D)
-    MouseMoveRelative { dx: i32, dy: i32 },
-    /// Botão do mouse (0=esquerdo, 1=meio, 2=direito)
-    MouseButton { button: u8, pressed: bool },
-    /// Scroll do mouse (positivo = para baixo)
-    MouseScroll { dy: i32 },
-    /// Tecla do teclado (keycode Linux)
-    Key { code: u16, pressed: bool },
-    /// Sincronizar texto para colar
-    ClipboardPaste { text: String },
-    /// Requisitar texto copiado
-    ClipboardRequest,
-    /// Medição de latência RTT
-    Ping { timestamp: u64 },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ControlResponse {
-    ClipboardSync { text: String },
-    Pong { timestamp: u64 },
-}
+pub use common::command::{ControlResponse, InputCommand};
 
 fn get_user_uid(username: &str) -> String {
     let output = Command::new("id")

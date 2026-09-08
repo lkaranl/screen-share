@@ -3,14 +3,18 @@
   <id>io.github.lkaranl.ScreenShareServer</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <name>Screen Share Server</name>
-  <summary>Servidor de transmissão de tela de ultra baixa latência</summary>
+  <name>Screen Share</name>
+  <summary>Compartilhamento e controle remoto de tela de ultra baixa latência</summary>
   <description>
     <p>
-      O Screen Share Server é uma solução de transmissão e controle remoto de tela
+      O Screen Share é uma solução integrada de transmissão e controle remoto de tela
       desenvolvida em Rust com suporte a aceleração por hardware VAAPI (HEVC e H.264),
       transmissão via pacotes RTP sobre UDP com Forward Error Correction (Reed-Solomon)
-      e controle de mouse e teclado virtuais de alta precisão.
+      e controle de mouse e teclado de alta precisão.
+    </p>
+    <p>
+      O aplicativo permite funcionar como Servidor (transmitindo a tela), como Cliente (visualizando
+      e controlando remotamente outro computador), ou em modo Ambos (para validação e testes locais).
     </p>
   </description>
   <launchable type="desktop-id">io.github.lkaranl.ScreenShareServer.desktop</launchable>
@@ -24,7 +28,7 @@
 
   <screenshots>
     <screenshot type="default">
-      <caption>Screen Share Server ativo transmitindo na rede local</caption>
+      <caption>Screen Share ativo transmitindo na rede local</caption>
       <image>https://raw.githubusercontent.com/lkaranl/screen-share/main/packaging/flatpak/icons/512x512.png</image>
     </screenshot>
   </screenshots>
@@ -32,6 +36,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.0" date="2026-09-08">
+      <description>
+        <p>Adicionado cliente nativo para Linux em Rust e lançador integrado com seleção de modo (Servidor, Cliente ou Ambos).</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-09-08">
       <description>
         <p>Versão inicial do Screen Share Server com aceleração por hardware VAAPI (HEVC e H.264) e uinput sem sudo.</p>
@@ -41,6 +50,8 @@
 
   <provides>
     <binary>server</binary>
+    <binary>client-linux</binary>
     <binary>screenshare-server-wrapper</binary>
+    <binary>screenshare-launcher</binary>
   </provides>
 </component>

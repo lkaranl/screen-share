@@ -4,7 +4,7 @@ runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: screenshare-server-wrapper
+command: screenshare-launcher
 
 finish-args:
   # Rede: escutar nas portas 5000 (UDP/TCP) e 5001 (TCP)
@@ -12,7 +12,7 @@ finish-args:
   - --share=ipc
   # Acesso total aos dispositivos de hardware (/dev/dri/card0, /dev/dri/renderD128, /dev/uinput)
   - --device=all
-  # Interface gráfica e sockets de exibição
+  # Interface gráfica e sockets de exibição (Wayland e X11)
   - --socket=wayland
   - --socket=fallback-x11
   # Diretório de runtime para PipeWire / Wayland
@@ -29,14 +29,16 @@ build-options:
     CARGO_HOME: /run/build/cargo
 
 modules:
-  - name: screenshare-server
+  - name: screenshare-app
     buildsystem: simple
     build-commands:
-      # Compilação do servidor em Rust (release)
-      - cargo build --release --manifest-path server/Cargo.toml
-      # Instalação dos executáveis
+      # Compilação de todos os componentes do workspace em Rust (release)
+      - cargo build --release --workspace
+      # Instalação dos binários do servidor, cliente e lançadores
       - install -Dm755 target/release/server /app/bin/server
+      - install -Dm755 target/release/client-linux /app/bin/client-linux
       - install -Dm755 packaging/flatpak/screenshare-server-wrapper.sh /app/bin/screenshare-server-wrapper
+      - install -Dm755 packaging/flatpak/screenshare-launcher.sh /app/bin/screenshare-launcher
       # Instalação de arquivos de desktop, metainfo e ícones
       - install -Dm644 packaging/flatpak/io.github.lkaranl.ScreenShareServer.desktop /app/share/applications/io.github.lkaranl.ScreenShareServer.desktop
       - install -Dm644 packaging/flatpak/io.github.lkaranl.ScreenShareServer.metainfo.xml /app/share/metainfo/io.github.lkaranl.ScreenShareServer.metainfo.xml

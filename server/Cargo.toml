@@ -9,6 +9,9 @@ name = "server"
 path = "src/main.rs"
 
 [dependencies]
+# Crate compartilhado com cliente
+common = { path = "../common" }
+
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 

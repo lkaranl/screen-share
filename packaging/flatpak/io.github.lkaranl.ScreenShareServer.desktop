@@ -1,10 +1,23 @@
 [Desktop Entry]
-Name=Screen Share Server
-Comment=Servidor de transmissão de tela em alta performance (RTP/UDP + FEC)
-Exec=screenshare-server-wrapper
+Name=Screen Share
+Comment=Compartilhamento e controle remoto de tela de ultra baixa latência (Servidor e Cliente)
+Exec=screenshare-launcher
 Icon=io.github.lkaranl.ScreenShareServer
 Terminal=false
 Type=Application
 Categories=Network;Utility;RemoteAccess;AudioVideo;
-Keywords=screen;share;streaming;remote;desktop;
+Keywords=screen;share;streaming;remote;desktop;server;client;
 StartupNotify=true
+Actions=ServerMode;ClientMode;BothMode;
+
+[Desktop Action ServerMode]
+Name=🖥️ Iniciar como Servidor (Transmitir tela)
+Exec=screenshare-launcher --server
+
+[Desktop Action ClientMode]
+Name=💻 Iniciar como Cliente (Visualizar tela)
+Exec=screenshare-launcher --client
+
+[Desktop Action BothMode]
+Name=🔄 Iniciar Ambos (Teste Local 127.0.0.1)
+Exec=screenshare-launcher --both
