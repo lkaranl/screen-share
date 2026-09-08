@@ -169,7 +169,7 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec) -> Result<()> 
                         });
                     }
                     Err(e) => {
-                        error!("❌ Falha ao iniciar FFmpeg: {}", e);
+                        error!("❌ Falha ao iniciar FFmpeg: {:#}", e);
                     }
                 }
             }

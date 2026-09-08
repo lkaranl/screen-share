@@ -29,11 +29,29 @@ pub struct CaptureConfig {
 
 impl Default for CaptureConfig {
     fn default() -> Self {
+        let drm_device = std::env::var("DRM_DEVICE").unwrap_or_else(|_| {
+            if std::path::Path::new("/dev/dri/card0").exists() && !std::path::Path::new("/dev/dri/card1").exists() {
+                "/dev/dri/card0".to_string()
+            } else if std::path::Path::new("/dev/dri/card1").exists() {
+                "/dev/dri/card1".to_string()
+            } else {
+                "/dev/dri/card0".to_string()
+            }
+        });
+
+        let render_device = std::env::var("RENDER_DEVICE").unwrap_or_else(|_| {
+            if std::path::Path::new("/dev/dri/renderD128").exists() {
+                "/dev/dri/renderD128".to_string()
+            } else if std::path::Path::new("/dev/dri/renderD129").exists() {
+                "/dev/dri/renderD129".to_string()
+            } else {
+                "/dev/dri/renderD128".to_string()
+            }
+        });
+
         Self {
-            drm_device: std::env::var("DRM_DEVICE")
-                .unwrap_or_else(|_| "/dev/dri/card1".to_string()),
-            render_device: std::env::var("RENDER_DEVICE")
-                .unwrap_or_else(|_| "/dev/dri/renderD128".to_string()),
+            drm_device,
+            render_device,
             framerate: 60,
             bitrate: std::env::var("BITRATE").unwrap_or_else(|_| "20M".to_string()),
             gop_size: 30,
@@ -127,7 +145,15 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .context("Falha ao iniciar ffmpeg com VAAPI. Verifique se o codec selecionado está disponível em hardware.")?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                anyhow::anyhow!("O binário 'ffmpeg' não foi encontrado no PATH do sistema. Certifique-se de que o FFmpeg está instalado nesta máquina ou container (ex: sudo dnf install ffmpeg ou sudo apt install ffmpeg). Erro: {}", e)
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                anyhow::anyhow!("Permissão negada ao tentar executar o binário FFmpeg (os error 13). Erro: {}", e)
+            } else {
+                anyhow::anyhow!("Falha ao iniciar processo ffmpeg: {}. Verifique se o binário está disponível.", e)
+            }
+        })?;
  
     let stdout = child
         .stdout
