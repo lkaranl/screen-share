@@ -82,10 +82,6 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
         "-filter_threads".to_string(), "1".to_string(),
         "-fflags".to_string(), "+nobuffer+flush_packets".to_string(),
         "-flags".to_string(), "low_delay".to_string(),
-        // ── Hardware VAAPI ────────────────────────────────────────────────────
-        "-init_hw_device".to_string(), format!("drm=drm:{}", config.render_device),
-        "-init_hw_device".to_string(), "vaapi=va@drm".to_string(),
-        "-filter_hw_device".to_string(), "va".to_string(),
         // ── Input: kmsgrab DRM/KMS ────────────────────────────────────────────
         "-f".to_string(), "kmsgrab".to_string(),
         "-device".to_string(), config.drm_device.clone(),
