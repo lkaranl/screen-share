@@ -157,7 +157,7 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec, default_resolu
                 config.codec = active_codec;
                 config.resolution = active_resolution;
 
-                match capture::spawn_ffmpeg(&config) {
+                match capture::spawn_ffmpeg(&mut config).await {
                     Ok((mut child, mut stdout)) => {
                         info!("🎬 FFmpeg iniciado ({:?}), transmitindo via RTP/UDP + FEC...", active_codec);
 
