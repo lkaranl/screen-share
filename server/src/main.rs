@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, error, warn};
 use anyhow::Result;
 
@@ -71,6 +71,44 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Gerencia a inibição de suspensão e ociosidade (sleep/idle) do Linux via systemd-inhibit
+/// enquanto uma sessão de streaming remota estiver ativa.
+struct SleepInhibitor {
+    child: Option<tokio::process::Child>,
+}
+
+impl SleepInhibitor {
+    pub fn start() -> Self {
+        let child = tokio::process::Command::new("systemd-inhibit")
+            .args([
+                "--what=idle:sleep",
+                "--who=screen-share-server",
+                "--why=Sessão de transmissão de tela ativa",
+                "sleep",
+                "infinity",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .ok();
+
+        if child.is_some() {
+            info!("🛡️ Inibidor de suspensão ativo: o sistema não entrará em sleep por ociosidade enquanto conectado.");
+        }
+
+        Self { child }
+    }
+}
+
+impl Drop for SleepInhibitor {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.start_kill();
+        }
+    }
+}
+
 async fn run_video_udp_server(default_codec: capture::VideoCodec, default_resolution: capture::VideoResolution) -> Result<()> {
     let udp_sender = Arc::new(UdpSender::bind(5000).await?);
     let fec_encoder = Arc::new(FecEncoder::new(20)); // 20% de tolerância a perdas (Reed-Solomon)
@@ -92,7 +130,7 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec, default_resolu
                 let mut handshake_buf = [0u8; 4];
                 let mut active_codec = default_codec;
                 let mut active_resolution = default_resolution;
-                let client_video_port = match tokio::io::AsyncReadExt::read(&mut socket, &mut handshake_buf).await {
+                let client_video_port = match socket.read(&mut handshake_buf).await {
                     Ok(n) if n >= 2 => {
                         let port = u16::from_be_bytes([handshake_buf[0], handshake_buf[1]]);
                         if n >= 3 {
@@ -167,40 +205,75 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec, default_resolu
                         session_cancel = Some(cancel_tx);
 
                         tokio::spawn(async move {
+                            let _sleep_guard = SleepInhibitor::start();
                             let mut extractor = NalExtractor::new(active_codec);
                             let mut buf = [0u8; 16384];
                             let mut frame_counter: u32 = 0;
 
-                            loop {
-                                tokio::select! {
-                                    _ = &mut cancel_rx => {
-                                        info!("🛑 Sessão cancelada por novo cliente.");
-                                        break;
-                                    }
-                                    result = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf) => {
-                                        match result {
-                                            Ok(0) => break,
-                                            Ok(n) => {
-                                                let frames = extractor.push_bytes(&buf[..n]);
-                                                for frame_nal in frames {
-                                                    frame_counter = frame_counter.wrapping_add(1);
-                                                    if let Ok(packets) = fec_encoder_clone.encode_frame(frame_counter, codec_id, &frame_nal) {
-                                                        let _ = udp_sender_clone.send_frame_packets(&packets, client_udp_target).await;
+                            'session: loop {
+                                loop {
+                                    tokio::select! {
+                                        _ = &mut cancel_rx => {
+                                            info!("🛑 Sessão cancelada por novo cliente.");
+                                            let _ = child.kill().await;
+                                            let _ = child.wait().await;
+                                            break 'session;
+                                        }
+                                        result = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf) => {
+                                            match result {
+                                                Ok(0) => {
+                                                    warn!("⚠️ Stream de vídeo FFmpeg encerrou (EOF). Possível suspensão do sistema, desligamento de tela (DPMS) ou perda de framebuffer.");
+                                                    break;
+                                                }
+                                                Ok(n) => {
+                                                    let frames = extractor.push_bytes(&buf[..n]);
+                                                    for frame_nal in frames {
+                                                        frame_counter = frame_counter.wrapping_add(1);
+                                                        if let Ok(packets) = fec_encoder_clone.encode_frame(frame_counter, codec_id, &frame_nal) {
+                                                            let _ = udp_sender_clone.send_frame_packets(&packets, client_udp_target).await;
+                                                        }
                                                     }
                                                 }
+                                                Err(e) => {
+                                                    warn!("⚠️ Erro na leitura do stream de vídeo: {}", e);
+                                                    break;
+                                                }
                                             }
-                                            Err(e) => {
-                                                warn!("⚠️ Erro na leitura do stream de vídeo: {}", e);
-                                                break;
+                                        }
+                                    }
+                                }
+
+                                let _ = child.kill().await;
+                                let _ = child.wait().await;
+
+                                // ── Modo Standby / Auto-Recovery ─────────────────
+                                info!("💤 Entrando em modo Standby (aguardando reativação do display/sistema)...");
+                                let mut reconnected = false;
+                                while !reconnected {
+                                    tokio::select! {
+                                        _ = &mut cancel_rx => {
+                                            info!("🛑 Sessão cancelada enquanto aguardava reativação do display.");
+                                            break 'session;
+                                        }
+                                        _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
+                                            match capture::spawn_ffmpeg(&mut config).await {
+                                                Ok((new_child, new_stdout)) => {
+                                                    info!("☀️ Display reativado com sucesso! Retomando transmissão de vídeo para o cliente...");
+                                                    child = new_child;
+                                                    stdout = new_stdout;
+                                                    extractor = NalExtractor::new(active_codec);
+                                                    reconnected = true;
+                                                }
+                                                Err(e) => {
+                                                    tracing::debug!("Aguardando reativação do DRM/display: {}", e);
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
 
-                            info!("🛑 Encerrando sessão FFmpeg...");
-                            let _ = child.kill().await;
-                            let _ = child.wait().await;
+                            info!("🛑 Sessão de vídeo encerrada.");
                         });
                     }
                     Err(e) => {

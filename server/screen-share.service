@@ -1,0 +1,22 @@
+[Unit]
+Description=Screen Share Server (KMS/VAAPI Streaming Daemon)
+After=network.target multi-user.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/screen-share-server
+Restart=always
+RestartSec=3
+KillMode=process
+
+# Executado como root para acesso aos dispositivos /dev/uinput e /dev/dri
+User=root
+Group=root
+
+# Otimizações de rede e prioridade de processo para streaming de baixa latência
+LimitNOFILE=65535
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target

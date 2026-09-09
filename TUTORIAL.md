@@ -53,7 +53,21 @@ Para rodar com o codec legado/fallback (**H.264**):
 sudo ./target/release/server --codec h264
 ```
 
-> **Atenção:** O terminal exibirá uma mensagem informando que os servidores TCP subiram (Portas 5000 e 5001) e mostrará o **IP do Linux** na rede local. Anote este IP. *(Nota: as preferências de codec e resolução escolhidas pelo cliente no handshake substituem dinamicamente o padrão).*
+### Método Alternativo: Como Serviço de Segundo Plano (Systemd Daemon) - Recomendado
+
+Para não precisar manter um terminal aberto e fazer o servidor iniciar automaticamente no boot do sistema:
+
+```bash
+./server/install_service.sh
+```
+
+Esse script compila o projeto em modo release, instala em `/usr/local/bin/screen-share-server` e configura a inicialização automática via Systemd.
+
+- **Ver status:** `sudo systemctl status screen-share`
+- **Acompanhar logs:** `journalctl -u screen-share -f`
+- **Reiniciar:** `sudo systemctl restart screen-share`
+- **Parar:** `sudo systemctl stop screen-share`
+- **Desinstalar:** `./server/uninstall_service.sh`
 
 ---
 
