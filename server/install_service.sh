@@ -55,11 +55,12 @@ if ! command -v ffmpeg &>/dev/null; then
 fi
 
 # Checagem de encoders de hardware VAAPI no FFmpeg
-if ! ffmpeg -encoders 2>/dev/null | grep -qE "hevc_vaapi|h264_vaapi"; then
+FFMPEG_ENCODERS="$(ffmpeg -encoders 2>/dev/null || true)"
+if echo "$FFMPEG_ENCODERS" | grep -E "hevc_vaapi|h264_vaapi" >/dev/null; then
+    echo "✅ FFmpeg com suporte a VAAPI detectado (hevc_vaapi / h264_vaapi)."
+else
     echo "⚠️  Aviso: O FFmpeg instalado não listou 'hevc_vaapi' ou 'h264_vaapi'."
     echo "   Recomenda-se uma compilação do FFmpeg com suporte a VAAPI para melhor performance."
-else
-    echo "✅ FFmpeg com suporte a VAAPI detectado."
 fi
 
 # Checagem de dispositivos DRM de vídeo
