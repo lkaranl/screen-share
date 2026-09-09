@@ -205,6 +205,7 @@ struct StreamVideoViewRepresentable: NSViewRepresentable {
 final class StreamSession: ObservableObject {
     let host: String
     let codec: VideoCodecType
+    let resolution: VideoResolutionType
 
     let videoReceiver: UdpVideoReceiver
     let controlClient: ControlClient
@@ -213,9 +214,10 @@ final class StreamSession: ObservableObject {
     @Published var fps: Int = 60
     @Published var latency: UInt32 = 0
 
-    init(host: String, codec: VideoCodecType) {
+    init(host: String, codec: VideoCodecType, resolution: VideoResolutionType) {
         self.host = host
         self.codec = codec
+        self.resolution = resolution
 
         let receiver = UdpVideoReceiver(codec: codec)
         let control = ControlClient()
@@ -225,7 +227,7 @@ final class StreamSession: ObservableObject {
         self.controlClient = control
         self.inputManager = input
 
-        print("🚀 StreamSession criada para \(host) com codec \(codec) via RTP/UDP + FEC")
+        print("🚀 StreamSession criada para \(host) com codec \(codec) e resolução \(resolution.displayName) via RTP/UDP + FEC")
     }
 
     func start() {
@@ -248,8 +250,9 @@ final class StreamSession: ObservableObject {
         sendVideoHandshake(host: host)
     }
 
-    /// Abre uma conexão TCP na porta 5000 e envia 3 bytes com a porta UDP de escuta (50000)
-    /// e o codec selecionado (0 = H.264, 1 = HEVC), informando ao servidor como inicializar o stream.
+    /// Abre uma conexão TCP na porta 5000 e envia 4 bytes com a porta UDP de escuta (50000),
+    /// o codec selecionado (0 = H.264, 1 = HEVC) e a resolução (0 = 1080p, 1 = 2K, 2 = 4K),
+    /// informando ao servidor como inicializar o stream.
     private func sendVideoHandshake(host: String) {
         let tcpOptions = NWProtocolTCP.Options()
         tcpOptions.noDelay = true
@@ -261,16 +264,18 @@ final class StreamSession: ObservableObject {
         )
 
         let selectedCodec = self.codec
+        let selectedResolution = self.resolution
         conn.stateUpdateHandler = { [weak conn] state in
             switch state {
             case .ready:
-                print("🔗 Canal de Handshake de Vídeo TCP conectado — informando porta UDP \(UdpVideoReceiver.videoListenPort) e codec \(selectedCodec)")
-                // Envia a porta UDP como 2 bytes big-endian + 1 byte de codec (0 = H264, 1 = HEVC)
+                print("🔗 Canal de Handshake de Vídeo TCP conectado — informando porta UDP \(UdpVideoReceiver.videoListenPort), codec \(selectedCodec) e resolução \(selectedResolution.displayName)")
+                // Envia a porta UDP como 2 bytes big-endian + 1 byte de codec (0 = H264, 1 = HEVC) + 1 byte de resolução (0 = FHD, 1 = QHD, 2 = UHD)
                 var handshakeBytes = Data()
                 var port = UdpVideoReceiver.videoListenPort.bigEndian
                 handshakeBytes.append(Data(bytes: &port, count: 2))
                 let codecByte: UInt8 = (selectedCodec == .hevc) ? 1 : 0
                 handshakeBytes.append(codecByte)
+                handshakeBytes.append(selectedResolution.rawValue)
 
                 conn?.send(content: handshakeBytes, completion: .contentProcessed({ _ in
                     conn?.cancel()
@@ -297,8 +302,8 @@ struct StreamView: View {
     @StateObject private var session: StreamSession
     let onDisconnect: () -> Void
 
-    init(host: String, codec: VideoCodecType, onDisconnect: @escaping () -> Void) {
-        _session = StateObject(wrappedValue: StreamSession(host: host, codec: codec))
+    init(host: String, codec: VideoCodecType, resolution: VideoResolutionType, onDisconnect: @escaping () -> Void) {
+        _session = StateObject(wrappedValue: StreamSession(host: host, codec: codec, resolution: resolution))
         self.onDisconnect = onDisconnect
     }
 
@@ -313,7 +318,7 @@ struct StreamView: View {
             )
             .ignoresSafeArea()
 
-            HUDOverlayView(fps: session.fps, latency: session.latency)
+            HUDOverlayView(fps: session.fps, latency: session.latency, resolution: session.resolution)
                 .padding(.top, 14)
                 .padding(.trailing, 14)
         }

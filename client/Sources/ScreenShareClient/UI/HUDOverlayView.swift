@@ -3,6 +3,7 @@ import SwiftUI
 struct HUDOverlayView: View {
     let fps: Int
     let latency: UInt32
+    let resolution: VideoResolutionType
 
     private var statusColor: Color {
         if latency <= 15 {
@@ -24,6 +25,14 @@ struct HUDOverlayView: View {
             Text("\(fps) FPS")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundColor(.white)
+
+            Text("|")
+                .font(.system(size: 10, weight: .light))
+                .foregroundColor(.gray)
+
+            Text(resolution.shortName)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(Color(red: 0.0, green: 0.8, blue: 1.0))
 
             Text("|")
                 .font(.system(size: 10, weight: .light))

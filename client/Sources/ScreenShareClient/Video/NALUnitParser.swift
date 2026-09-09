@@ -6,6 +6,49 @@ enum VideoCodecType {
     case hevc
 }
 
+enum VideoResolutionType: UInt8, CaseIterable, Identifiable {
+    case fhd = 0 // 1080p (1920x1080)
+    case qhd = 1 // 2K (2560x1440)
+    case uhd = 2 // 4K (3840x2160)
+
+    var id: UInt8 { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fhd: return "1080p"
+        case .qhd: return "2K (1440p)"
+        case .uhd: return "4K (2160p)"
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .fhd: return "1080p"
+        case .qhd: return "2K"
+        case .uhd: return "4K"
+        }
+    }
+
+    var dimensions: (width: Int, height: Int) {
+        switch self {
+        case .fhd: return (1920, 1080)
+        case .qhd: return (2560, 1440)
+        case .uhd: return (3840, 2160)
+        }
+    }
+
+    static func fromString(_ str: String) -> VideoResolutionType {
+        let lower = str.lowercased()
+        if lower.contains("4k") || lower.contains("2160") || lower.contains("uhd") {
+            return .uhd
+        } else if lower.contains("2k") || lower.contains("1440") || lower.contains("qhd") {
+            return .qhd
+        } else {
+            return .fhd
+        }
+    }
+}
+
 struct NALUnit {
     let data: Data
     let type: UInt8

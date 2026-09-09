@@ -39,11 +39,14 @@ Na máquina Linux a ser controlada:
 # Compilar o servidor
 cargo build --release -p server
 
-# Executar o servidor (exige privilégios de superusuário para KMS e uinput)
+# Executar o servidor (padrão HEVC / 1080p, exige root para KMS e uinput)
 sudo ./target/release/server
 
-# Ou com codec HEVC / H.265:
-sudo ./target/release/server --codec hevc
+# Ou especificando resolução 2K / 4K:
+sudo ./target/release/server --res 2k
+
+# Ou com codec H.264 (legado/fallback):
+sudo ./target/release/server --codec h264
 ```
 
 ---
@@ -63,15 +66,19 @@ swift build -c release
   ```bash
   ./client/.build/release/ScreenShareClient
   ```
-  *(Abre a interface nativa em SwiftUI para digitar o IP, selecionar o codec e acessar o histórico de conexões)*
+  *(Abre a interface nativa em SwiftUI com HEVC pré-selecionado por padrão, permitindo escolher o codec, resolução [1080p, 2K, 4K] e histórico)*
 
 - **Modo Conexão Direta (CLI):**
   ```bash
-  # Conexão direta com H.264
+  # Conexão direta com HEVC em 1080p (padrão do projeto)
   ./client/.build/release/ScreenShareClient 192.168.x.x
 
-  # Conexão direta com HEVC / H.265
-  ./client/.build/release/ScreenShareClient 192.168.x.x --codec hevc
+  # Conexão direta em 2K (1440p) ou 4K com HEVC
+  ./client/.build/release/ScreenShareClient 192.168.x.x --res 2k
+  ./client/.build/release/ScreenShareClient 192.168.x.x --res 4k
+
+  # Conexão direta forçando H.264 (fallback)
+  ./client/.build/release/ScreenShareClient 192.168.x.x --codec h264
   ```
 
 ---

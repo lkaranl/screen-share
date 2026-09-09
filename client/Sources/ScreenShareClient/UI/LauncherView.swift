@@ -1,12 +1,14 @@
 import SwiftUI
 
 struct LauncherView: View {
-    let onConnect: (String, VideoCodecType) -> Void
+    let onConnect: (String, VideoCodecType, VideoResolutionType) -> Void
 
     @AppStorage("last_ip") private var lastIP: String = ""
-    @AppStorage("last_codec") private var lastCodecRaw: String = "h264"
+    @AppStorage("last_codec") private var lastCodecRaw: String = "hevc"
+    @AppStorage("last_resolution") private var lastResolutionRaw: String = "1080p"
     @State private var ipText: String = ""
-    @State private var selectedCodec: VideoCodecType = .h264
+    @State private var selectedCodec: VideoCodecType = .hevc
+    @State private var selectedResolution: VideoResolutionType = .fhd
     @State private var history: [String] = []
     @FocusState private var isFieldFocused: Bool
 
@@ -33,7 +35,7 @@ struct LauncherView: View {
             }
             .padding(.top, 10)
 
-            // Card Principal: Entrada de IP e Codec
+            // Card Principal: Entrada de IP, Codec e Resolução
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("ENDEREÇO IP DO HOST")
@@ -88,6 +90,18 @@ struct LauncherView: View {
                     HStack(spacing: 10) {
                         codecButton(title: "🚀 H.264 (Baixa Latência)", type: .h264)
                         codecButton(title: "💎 HEVC (H.265)", type: .hevc)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("RESOLUÇÃO DE STREAMING")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(Color.white.opacity(0.5))
+
+                    HStack(spacing: 8) {
+                        resolutionButton(title: "🖥️ 1080p", type: .fhd)
+                        resolutionButton(title: "✨ 2K (1440p)", type: .qhd)
+                        resolutionButton(title: "🌟 4K (2160p)", type: .uhd)
                     }
                 }
             }
@@ -173,7 +187,7 @@ struct LauncherView: View {
                 .foregroundColor(Color.white.opacity(0.3))
         }
         .padding(24)
-        .frame(width: 420, height: 490)
+        .frame(width: 420, height: 550)
         .background(Color(red: 0.07, green: 0.08, blue: 0.12))
         .onAppear {
             loadConfig()
@@ -201,6 +215,24 @@ struct LauncherView: View {
         .buttonStyle(PlainButtonStyle())
     }
 
+    private func resolutionButton(title: String, type: VideoResolutionType) -> some View {
+        let isSelected = selectedResolution == type
+        return Button(action: { selectedResolution = type }) {
+            Text(title)
+                .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                .foregroundColor(isSelected ? .white : Color.white.opacity(0.6))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(isSelected ? Color(red: 0.0, green: 0.55, blue: 0.85) : Color.white.opacity(0.06))
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isSelected ? Color.white.opacity(0.3) : Color.clear, lineWidth: 1)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
     private func pasteFromClipboard() {
         if let str = NSPasteboard.general.string(forType: .string) {
             ipText = str.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -214,6 +246,7 @@ struct LauncherView: View {
         } else {
             selectedCodec = .h264
         }
+        selectedResolution = VideoResolutionType.fromString(lastResolutionRaw)
         if let saved = UserDefaults.standard.stringArray(forKey: historyKey) {
             history = saved
         }
@@ -225,6 +258,7 @@ struct LauncherView: View {
 
         lastIP = trimmed
         lastCodecRaw = selectedCodec == .hevc ? "hevc" : "h264"
+        lastResolutionRaw = selectedResolution.shortName
 
         var updated = history.filter { $0 != trimmed }
         updated.insert(trimmed, at: 0)
@@ -234,7 +268,7 @@ struct LauncherView: View {
         history = updated
         UserDefaults.standard.set(updated, forKey: historyKey)
 
-        onConnect(trimmed, selectedCodec)
+        onConnect(trimmed, selectedCodec, selectedResolution)
     }
 
     private func removeHistory(_ server: String) {

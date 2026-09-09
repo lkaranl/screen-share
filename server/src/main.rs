@@ -39,6 +39,20 @@ async fn main() -> Result<()> {
         }
     }
 
+    let mut resolution = capture::VideoResolution::FHD;
+    if let Some(pos) = args.iter().position(|x| x == "--res" || x == "--resolution") {
+        if pos + 1 < args.len() {
+            match args[pos + 1].to_lowercase().as_str() {
+                "4k" | "2160p" | "uhd" => resolution = capture::VideoResolution::UHD,
+                "2k" | "1440p" | "qhd" => resolution = capture::VideoResolution::QHD,
+                "1080p" | "fhd" => resolution = capture::VideoResolution::FHD,
+                other => {
+                    warn!("⚠️ Resolução desconhecida '{}', usando padrão 1080p", other);
+                }
+            }
+        }
+    }
+
     // Start input handler (uinput virtual devices)
     let input_tx = input::start_input_handler()?;
     info!("✅ Dispositivos virtuais de input criados (mouse + teclado)");
@@ -52,18 +66,18 @@ async fn main() -> Result<()> {
     });
 
     // Run Video UDP + FEC Server (Porta 5000)
-    run_video_udp_server(codec).await?;
+    run_video_udp_server(codec, resolution).await?;
 
     Ok(())
 }
 
-async fn run_video_udp_server(default_codec: capture::VideoCodec) -> Result<()> {
+async fn run_video_udp_server(default_codec: capture::VideoCodec, default_resolution: capture::VideoResolution) -> Result<()> {
     let udp_sender = Arc::new(UdpSender::bind(5000).await?);
     let fec_encoder = Arc::new(FecEncoder::new(20)); // 20% de tolerância a perdas (Reed-Solomon)
 
     // Handshake de sessão exclusivamente via TCP na porta 5000
     let tcp_listener = TcpListener::bind("0.0.0.0:5000").await?;
-    info!("🎥 Servidor de Vídeo pronto | Codec padrão: {:?} | Aguardando cliente TCP na porta 5000", default_codec);
+    info!("🎥 Servidor de Vídeo pronto | Codec: {:?} | Resolução padrão: {} | Aguardando cliente TCP na porta 5000", default_codec, default_resolution.name());
 
     // Canal de cancelamento da sessão ativa (apenas um FFmpeg por vez)
     let mut session_cancel: Option<tokio::sync::oneshot::Sender<()>> = None;
@@ -74,9 +88,10 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec) -> Result<()> 
                 info!("🔗 Handshake TCP de sessão de {}", client_addr);
                 let _ = socket.set_nodelay(true);
 
-                // Lê dados do handshake (2 bytes porta + 1 byte codec opcional)
-                let mut handshake_buf = [0u8; 3];
+                // Lê dados do handshake (2 bytes porta + 1 byte codec + 1 byte resolução opcionais)
+                let mut handshake_buf = [0u8; 4];
                 let mut active_codec = default_codec;
+                let mut active_resolution = default_resolution;
                 let client_video_port = match tokio::io::AsyncReadExt::read(&mut socket, &mut handshake_buf).await {
                     Ok(n) if n >= 2 => {
                         let port = u16::from_be_bytes([handshake_buf[0], handshake_buf[1]]);
@@ -95,6 +110,25 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec) -> Result<()> 
                                 }
                             }
                         }
+                        if n >= 4 {
+                            match handshake_buf[3] {
+                                0 => {
+                                    active_resolution = capture::VideoResolution::FHD;
+                                    info!("📐 Cliente solicitou resolução 1080p (FHD) no handshake");
+                                }
+                                1 => {
+                                    active_resolution = capture::VideoResolution::QHD;
+                                    info!("📐 Cliente solicitou resolução 2K (1440p) no handshake");
+                                }
+                                2 => {
+                                    active_resolution = capture::VideoResolution::UHD;
+                                    info!("📐 Cliente solicitou resolução 4K (2160p) no handshake");
+                                }
+                                other => {
+                                    warn!("⚠️ Código de resolução desconhecido ({}) no handshake, usando padrão {:?}", other, default_resolution);
+                                }
+                            }
+                        }
                         port
                     }
                     _ => {
@@ -110,7 +144,7 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec) -> Result<()> 
                 };
 
                 let client_udp_target = SocketAddr::new(client_addr.ip(), client_video_port);
-                info!("🚀 Iniciando transmissão UDP de vídeo ({:?}) para {} (porta {})", active_codec, client_udp_target, client_video_port);
+                info!("🚀 Iniciando transmissão UDP de vídeo ({:?}, {}) para {} (porta {})", active_codec, active_resolution.name(), client_udp_target, client_video_port);
 
                 // Cancela a sessão anterior se existir
                 if let Some(tx) = session_cancel.take() {
@@ -121,6 +155,7 @@ async fn run_video_udp_server(default_codec: capture::VideoCodec) -> Result<()> 
 
                 let mut config = CaptureConfig::default();
                 config.codec = active_codec;
+                config.resolution = active_resolution;
 
                 match capture::spawn_ffmpeg(&config) {
                     Ok((mut child, mut stdout)) => {

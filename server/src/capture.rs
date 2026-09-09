@@ -10,6 +10,32 @@ pub enum VideoCodec {
     AV1,
 }
 
+/// Resoluções de vídeo suportadas pelo servidor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VideoResolution {
+    FHD, // 1080p (1920x1080)
+    QHD, // 2K (2560x1440)
+    UHD, // 4K (3840x2160)
+}
+
+impl VideoResolution {
+    pub fn dimensions(&self) -> (u32, u32) {
+        match self {
+            VideoResolution::FHD => (1920, 1080),
+            VideoResolution::QHD => (2560, 1440),
+            VideoResolution::UHD => (3840, 2160),
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            VideoResolution::FHD => "1080p (FHD)",
+            VideoResolution::QHD => "2K (1440p)",
+            VideoResolution::UHD => "4K (2160p)",
+        }
+    }
+}
+
 /// Configuração do pipeline de captura de tela.
 #[derive(Debug, Clone)]
 pub struct CaptureConfig {
@@ -25,6 +51,8 @@ pub struct CaptureConfig {
     pub gop_size: u32,
     /// Codec de vídeo a ser utilizado
     pub codec: VideoCodec,
+    /// Resolução de vídeo alvo
+    pub resolution: VideoResolution,
 }
 
 impl Default for CaptureConfig {
@@ -55,7 +83,8 @@ impl Default for CaptureConfig {
             framerate: 60,
             bitrate: std::env::var("BITRATE").unwrap_or_else(|_| "20M".to_string()),
             gop_size: 30,
-            codec: VideoCodec::H264,
+            codec: VideoCodec::HEVC,
+            resolution: VideoResolution::FHD,
         }
     }
 }
@@ -63,16 +92,17 @@ impl Default for CaptureConfig {
 /// Inicia o processo FFmpeg para captura de tela via kmsgrab + VAAPI.
 ///
 /// ## Pipeline FFmpeg (GPU inteiro):
-/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(nv12) → codec_vaapi → Annex-B → stdout`
+/// `kmsgrab(DRM) → hwmap(VAAPI) → scale_vaapi(w:h:nv12) → codec_vaapi → Annex-B → stdout`
 ///
 /// Retorna `(Child, ChildStdout)` — o caller deve manter `Child` vivo.
 pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
-    // Pipeline: mantém frame na GPU via VAAPI e converte formato de cor para nv12 na GPU
-    let vf = "hwmap=derive_device=vaapi,scale_vaapi=format=nv12".to_string();
+    let (width, height) = config.resolution.dimensions();
+    // Pipeline: mantém frame na GPU via VAAPI, escala para a resolução desejada e converte cor para nv12 na GPU
+    let vf = format!("hwmap=derive_device=vaapi,scale_vaapi=w={}:h={}:format=nv12", width, height);
 
     info!(
-        "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} fps={} bitrate={} gop={} codec={:?}",
-        config.drm_device, config.render_device, config.framerate, config.bitrate, config.gop_size, config.codec
+        "🎬 Iniciando FFmpeg (VAAPI): kmsgrab device={} render={} res={} ({}x{}) fps={} bitrate={} gop={} codec={:?}",
+        config.drm_device, config.render_device, config.resolution.name(), width, height, config.framerate, config.bitrate, config.gop_size, config.codec
     );
 
     let mut ffmpeg_args = vec![
@@ -93,10 +123,16 @@ pub fn spawn_ffmpeg(config: &CaptureConfig) -> Result<(Child, ChildStdout)> {
 
     match config.codec {
         VideoCodec::H264 => {
+            let h264_level = match config.resolution {
+                VideoResolution::FHD => "41",
+                VideoResolution::QHD => "51",
+                VideoResolution::UHD => "52",
+            };
+
             ffmpeg_args.extend([
                 "-c:v".to_string(), "h264_vaapi".to_string(),
                 "-profile:v".to_string(), "constrained_baseline".to_string(),
-                "-level".to_string(), "41".to_string(),
+                "-level".to_string(), h264_level.to_string(),
                 "-bf".to_string(), "0".to_string(),
                 "-async_depth".to_string(), "1".to_string(),
                 "-rc_mode".to_string(), "CQP".to_string(),
